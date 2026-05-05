@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Privacy-first local LLM system for qualitative analysis of ethnographic interview corpora. All inference runs on-device via Ollama — no data ever leaves the machine.
+Privacy-first local LLM system for qualitative analysis of ethnographic interview corpora. All inference runs on-device via Ollama — no data ever leaves the machine. FastAPI backend.
 
 ## Commands
 

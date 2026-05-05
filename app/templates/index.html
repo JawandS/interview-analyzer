@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Interview Analyzer</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <style>
     /* ── Theme tokens ─────────────────────────────── */
@@ -171,6 +172,73 @@
     .icon-sun  { display: block; }
     [data-theme="light"] .icon-moon { display: block; }
     [data-theme="light"] .icon-sun  { display: none; }
+
+    /* ── Header right cluster ─────────────────────── */
+    .hd-right {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    /* ── Model selector ───────────────────────────── */
+    .model-select {
+      font-family: "Consolas", "Menlo", "Courier New", monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid var(--border-hard);
+      border-radius: 4px;
+      padding: 0.28rem 1.5rem 0.28rem 0.55rem;
+      cursor: pointer;
+      outline: none;
+      appearance: none;
+      -webkit-appearance: none;
+      max-width: 180px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238a7a66'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.45rem center;
+      background-size: 8px;
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .model-select:hover, .model-select:focus {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .model-select option {
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .model-loading {
+      font-family: "Consolas", "Menlo", "Courier New", monospace;
+      font-size: 0.68rem;
+      color: var(--muted);
+      opacity: 0.5;
+      letter-spacing: 0.1em;
+      animation: blink 1.2s steps(1) infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 0.5; }
+      50%       { opacity: 0.15; }
+    }
+
+    .model-error {
+      font-family: "Consolas", "Menlo", "Courier New", monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      color: #c0504a;
+    }
+
+    /* Status dot turns red when Ollama unreachable */
+    .status-dot[data-connected="false"] {
+      background: #c0504a;
+      box-shadow: 0 0 6px rgba(192, 80, 74, 0.5);
+      animation: none;
+    }
 
     /* ── Messages scroll area ─────────────────────── */
     #messages {
@@ -359,24 +427,29 @@
       <span class="hd-title">Interview Analyzer</span>
       <span class="hd-tag">&nbsp;· local · private · on-device</span>
     </div>
-    <button id="themeBtn" aria-label="Toggle theme">
-      <!-- Sun icon — shown in dark mode to switch to light -->
-      <svg class="icon-sun" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="5"/>
-        <line x1="12" y1="1"     x2="12" y2="3"/>
-        <line x1="12" y1="21"    x2="12" y2="23"/>
-        <line x1="4.22" y1="4.22"   x2="5.64" y2="5.64"/>
-        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-        <line x1="1" y1="12"     x2="3" y2="12"/>
-        <line x1="21" y1="12"    x2="23" y2="12"/>
-        <line x1="4.22" y1="19.78"  x2="5.64" y2="18.36"/>
-        <line x1="18.36" y1="5.64"  x2="19.78" y2="4.22"/>
-      </svg>
-      <!-- Moon icon — shown in light mode to switch to dark -->
-      <svg class="icon-moon" viewBox="0 0 24 24">
-        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-      </svg>
-    </button>
+    <div class="hd-right">
+      <div id="model-loader" hx-get="/models" hx-trigger="load" hx-swap="outerHTML">
+        <span class="model-loading">···</span>
+      </div>
+      <button id="themeBtn" aria-label="Toggle theme">
+        <!-- Sun icon — shown in dark mode to switch to light -->
+        <svg class="icon-sun" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="5"/>
+          <line x1="12" y1="1"     x2="12" y2="3"/>
+          <line x1="12" y1="21"    x2="12" y2="23"/>
+          <line x1="4.22" y1="4.22"   x2="5.64" y2="5.64"/>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+          <line x1="1" y1="12"     x2="3" y2="12"/>
+          <line x1="21" y1="12"    x2="23" y2="12"/>
+          <line x1="4.22" y1="19.78"  x2="5.64" y2="18.36"/>
+          <line x1="18.36" y1="5.64"  x2="19.78" y2="4.22"/>
+        </svg>
+        <!-- Moon icon — shown in light mode to switch to dark -->
+        <svg class="icon-moon" viewBox="0 0 24 24">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+    </div>
   </header>
 
   <div id="messages">
@@ -392,6 +465,7 @@
         hx-post="/chat"
         hx-target="#messages"
         hx-swap="beforeend"
+        hx-include="#model-select"
         hx-on::after-request="this.reset();"
       >
         <textarea
@@ -483,7 +557,12 @@
       msgs.scrollTop = 999999;
     });
 
-    document.body.addEventListener('htmx:afterSwap', () => {
+    document.body.addEventListener('htmx:afterSwap', e => {
+      // Update status dot when models finish loading
+      if (!document.getElementById('model-loader')) {
+        const connected = !!document.getElementById('model-select');
+        document.querySelector('.status-dot').dataset.connected = connected;
+      }
       hideTyping();
       document.getElementById('messages').scrollTop = 999999;
     });
