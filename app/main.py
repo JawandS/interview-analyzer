@@ -9,9 +9,11 @@ import aiosqlite
 import html
 import httpx
 import json
+import logging
 import os
 from pathlib import Path
 import subprocess
+from app import rag
 
 
 def _wsl_gateway() -> str:
@@ -72,8 +74,10 @@ async def _warmup():
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    logging.basicConfig(level=logging.INFO)
     await _init_db()
     asyncio.create_task(_warmup())
+    asyncio.create_task(rag.ingest(OLLAMA_BASE))
     yield
 
 
@@ -175,6 +179,14 @@ async def update_session_title(session_id: int, title: str = Form(...)):
     return {"ok": True}
 
 
+# ── RAG ───────────────────────────────────────────────────────
+
+@app.post("/ingest")
+async def trigger_ingest():
+    await rag.ingest(OLLAMA_BASE)
+    return {"ok": True}
+
+
 # ── Chat ──────────────────────────────────────────────────────
 
 @app.post("/chat")
@@ -195,15 +207,25 @@ async def chat(
         )
         await db.commit()
 
+    chunks = await rag.retrieve(message, OLLAMA_BASE)
+    system_prompt = (
+        "You are analyzing an ethnographic interview corpus. "
+        "Use the following excerpts to inform your response:\n\n"
+        + "\n\n---\n\n".join(chunks)
+    ) if chunks else None
+
     async def generate():
         response_parts: list[str] = []
         thinking_parts: list[str] = []
+        payload: dict = {"model": model, "prompt": message, "stream": True, "keep_alive": KEEP_ALIVE, "think": True}
+        if system_prompt:
+            payload["system"] = system_prompt
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
                 async with client.stream(
                     "POST",
                     f"{OLLAMA_BASE}/api/generate",
-                    json={"model": model, "prompt": message, "stream": True, "keep_alive": KEEP_ALIVE, "think": True},
+                    json=payload,
                 ) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
