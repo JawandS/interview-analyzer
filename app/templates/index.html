@@ -9,30 +9,36 @@
   <style>
     /* ── Theme tokens ─────────────────────────────── */
     :root {
-      --bg:          #12100e;
-      --surface:     rgba(28, 25, 22, 0.72);
-      --border:      rgba(212, 145, 74, 0.14);
-      --border-hard: #2e2a26;
-      --accent:      #d4914a;
-      --accent-dim:  rgba(212, 145, 74, 0.11);
-      --text:        #e8e2d8;
-      --muted:       #7a6f64;
-      --grid:        rgba(212, 145, 74, 0.055);
-      --glow:        rgba(212, 145, 74, 0.18);
-      --shadow:      rgba(0, 0, 0, 0.45);
+      --bg:            #12100e;
+      --surface:       rgba(28, 25, 22, 0.72);
+      --surface-solid: #1c1916;
+      --border:        rgba(212, 145, 74, 0.14);
+      --border-hard:   #2e2a26;
+      --accent:        #d4914a;
+      --accent-dim:    rgba(212, 145, 74, 0.11);
+      --text:          #e8e2d8;
+      --muted:         #7a6f64;
+      --grid:          rgba(212, 145, 74, 0.055);
+      --glow:          rgba(212, 145, 74, 0.18);
+      --shadow:        rgba(0, 0, 0, 0.45);
+      --think-bg:      rgba(212, 145, 74, 0.055);
+      --think-border:  rgba(212, 145, 74, 0.18);
     }
     [data-theme="light"] {
-      --bg:          #faf7f2;
-      --surface:     rgba(240, 235, 226, 0.75);
-      --border:      rgba(184, 114, 42, 0.18);
-      --border-hard: #d4c9b8;
-      --accent:      #b8722a;
-      --accent-dim:  rgba(184, 114, 42, 0.09);
-      --text:        #2a2018;
-      --muted:       #8a7a66;
-      --grid:        rgba(184, 114, 42, 0.07);
-      --glow:        rgba(184, 114, 42, 0.15);
-      --shadow:      rgba(42, 32, 24, 0.14);
+      --bg:            #faf7f2;
+      --surface:       rgba(240, 235, 226, 0.75);
+      --surface-solid: #f0ebe2;
+      --border:        rgba(184, 114, 42, 0.18);
+      --border-hard:   #d4c9b8;
+      --accent:        #b8722a;
+      --accent-dim:    rgba(184, 114, 42, 0.09);
+      --text:          #2a2018;
+      --muted:         #8a7a66;
+      --grid:          rgba(184, 114, 42, 0.07);
+      --glow:          rgba(184, 114, 42, 0.15);
+      --shadow:        rgba(42, 32, 24, 0.14);
+      --think-bg:      rgba(184, 114, 42, 0.055);
+      --think-border:  rgba(184, 114, 42, 0.18);
     }
 
     /* ── Reset ────────────────────────────────────── */
@@ -43,8 +49,7 @@
     body {
       font-family: Georgia, "Constantia", "Palatino Linotype", serif;
       background-color: var(--bg);
-      background-image:
-        radial-gradient(circle, var(--grid) 1px, transparent 1px);
+      background-image: radial-gradient(circle, var(--grid) 1px, transparent 1px);
       background-size: 22px 22px;
       color: var(--text);
       height: 100dvh;
@@ -53,7 +58,6 @@
       transition: background-color 0.35s, color 0.35s;
     }
 
-    /* Vignette + grain */
     body::before, body::after {
       content: '';
       position: fixed;
@@ -73,22 +77,15 @@
       background: radial-gradient(ellipse at center, transparent 55%, rgba(42,32,24,0.08) 100%);
     }
 
-    /* ── Glass mixin ──────────────────────────────── */
-    .glass {
-      background: var(--surface);
-      backdrop-filter: blur(14px) saturate(1.4);
-      -webkit-backdrop-filter: blur(14px) saturate(1.4);
-      border: 1px solid var(--border);
-    }
-
-    /* ── Header ───────────────────────────────────── */
+    /* ── Header — 3-col grid so center is truly centered ─ */
     header {
       flex-shrink: 0;
-      padding: 0.8rem 1.4rem;
+      padding: 0.75rem 1.4rem;
       border-bottom: 1px solid var(--border-hard);
-      display: flex;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
       align-items: center;
-      justify-content: space-between;
+      gap: 1rem;
       background: var(--surface);
       backdrop-filter: blur(20px) saturate(1.5);
       -webkit-backdrop-filter: blur(20px) saturate(1.5);
@@ -100,7 +97,7 @@
     .hd-left {
       display: flex;
       align-items: center;
-      gap: 0.65rem;
+      gap: 0.6rem;
     }
 
     .status-dot {
@@ -111,6 +108,11 @@
       flex-shrink: 0;
       box-shadow: 0 0 6px var(--glow);
       animation: breathe 3.5s ease-in-out infinite;
+    }
+    .status-dot[data-connected="false"] {
+      background: #c0504a;
+      box-shadow: 0 0 6px rgba(192,80,74,0.5);
+      animation: none;
     }
 
     @keyframes breathe {
@@ -124,6 +126,7 @@
       letter-spacing: 0.13em;
       text-transform: uppercase;
       color: var(--muted);
+      white-space: nowrap;
     }
 
     .hd-tag {
@@ -131,10 +134,152 @@
       font-size: 0.6rem;
       letter-spacing: 0.07em;
       color: var(--muted);
-      opacity: 0.45;
+      opacity: 0.4;
+      white-space: nowrap;
     }
 
-    /* ── Theme toggle ─────────────────────────────── */
+    /* ── Model selector — center column ──────────── */
+    .hd-center {
+      display: flex;
+      justify-content: center;
+      position: relative; /* anchor for dropdown panel */
+    }
+
+    /* Hidden native select — keeps form submission working */
+    .model-select { display: none; }
+
+    /* Pill trigger button */
+    .model-pill {
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.28rem 0.75rem 0.28rem 0.9rem;
+      border: 1px solid var(--border-hard);
+      border-radius: 999px;
+      background: var(--surface-solid);
+      cursor: pointer;
+      font-family: "Consolas", "Menlo", "Courier New", monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.04em;
+      color: var(--text);
+      white-space: nowrap;
+      max-width: 240px;
+      overflow: hidden;
+      box-shadow: inset 0 1px 3px rgba(0,0,0,0.15);
+      transition: border-color 0.2s, box-shadow 0.2s;
+      user-select: none;
+    }
+    .model-pill::-webkit-details-marker { display: none; }
+
+    .model-pill:hover,
+    .model-picker[open] .model-pill {
+      border-color: var(--accent);
+      box-shadow: inset 0 1px 3px rgba(0,0,0,0.15), 0 0 10px var(--glow);
+    }
+
+    .model-pill-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .model-pill-chevron {
+      flex-shrink: 0;
+      width: 10px;
+      height: 10px;
+      stroke: var(--muted);
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transition: transform 0.2s;
+    }
+    .model-picker[open] .model-pill-chevron { transform: rotate(180deg); }
+
+    /* Dropdown panel */
+    .model-dropdown {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      min-width: 200px;
+      max-width: 300px;
+      max-height: 260px;
+      overflow-y: auto;
+      background: var(--surface-solid);
+      border: 1px solid var(--border-hard);
+      border-radius: 8px;
+      padding: 0.3rem;
+      z-index: 200;
+      box-shadow: 0 8px 28px var(--shadow), 0 0 0 1px var(--border);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-hard) transparent;
+      animation: dropIn 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    @keyframes dropIn {
+      from { opacity: 0; transform: translateX(-50%) translateY(-6px) scale(0.96); }
+      to   { opacity: 1; transform: translateX(-50%) translateY(0)     scale(1); }
+    }
+
+    .model-option {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 0.42rem 0.65rem;
+      background: none;
+      border: none;
+      border-radius: 5px;
+      color: var(--muted);
+      font-family: "Consolas", "Menlo", "Courier New", monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: background 0.12s, color 0.12s;
+    }
+
+    .model-option:hover {
+      background: var(--accent-dim);
+      color: var(--text);
+    }
+
+    .model-option[data-selected] {
+      color: var(--accent);
+    }
+
+    .model-option[data-selected]::before {
+      content: '✓  ';
+      font-size: 0.58rem;
+    }
+
+    .model-loading {
+      font-family: "Consolas", "Menlo", "Courier New", monospace;
+      font-size: 0.68rem;
+      color: var(--muted);
+      opacity: 0.5;
+      letter-spacing: 0.1em;
+      animation: pulse 1.2s steps(1) infinite;
+    }
+
+    .model-error {
+      font-family: "Consolas", "Menlo", "Courier New", monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      color: #c0504a;
+    }
+
+    /* ── Header right ─────────────────────────────── */
+    .hd-right {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+    }
+
     #themeBtn {
       width: 30px;
       height: 30px;
@@ -167,80 +312,12 @@
       stroke-linejoin: round;
     }
 
-    /* Show sun in dark mode (switch to light), moon in light mode (switch to dark) */
     .icon-moon { display: none; }
     .icon-sun  { display: block; }
     [data-theme="light"] .icon-moon { display: block; }
     [data-theme="light"] .icon-sun  { display: none; }
 
-    /* ── Header right cluster ─────────────────────── */
-    .hd-right {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-    }
-
-    /* ── Model selector ───────────────────────────── */
-    .model-select {
-      font-family: "Consolas", "Menlo", "Courier New", monospace;
-      font-size: 0.68rem;
-      letter-spacing: 0.06em;
-      color: var(--muted);
-      background: transparent;
-      border: 1px solid var(--border-hard);
-      border-radius: 4px;
-      padding: 0.28rem 1.5rem 0.28rem 0.55rem;
-      cursor: pointer;
-      outline: none;
-      appearance: none;
-      -webkit-appearance: none;
-      max-width: 180px;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238a7a66'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 0.45rem center;
-      background-size: 8px;
-      transition: border-color 0.2s, color 0.2s;
-    }
-
-    .model-select:hover, .model-select:focus {
-      border-color: var(--accent);
-      color: var(--text);
-    }
-
-    .model-select option {
-      background: var(--bg);
-      color: var(--text);
-    }
-
-    .model-loading {
-      font-family: "Consolas", "Menlo", "Courier New", monospace;
-      font-size: 0.68rem;
-      color: var(--muted);
-      opacity: 0.5;
-      letter-spacing: 0.1em;
-      animation: blink 1.2s steps(1) infinite;
-    }
-
-    @keyframes blink {
-      0%, 100% { opacity: 0.5; }
-      50%       { opacity: 0.15; }
-    }
-
-    .model-error {
-      font-family: "Consolas", "Menlo", "Courier New", monospace;
-      font-size: 0.68rem;
-      letter-spacing: 0.06em;
-      color: #c0504a;
-    }
-
-    /* Status dot turns red when Ollama unreachable */
-    .status-dot[data-connected="false"] {
-      background: #c0504a;
-      box-shadow: 0 0 6px rgba(192, 80, 74, 0.5);
-      animation: none;
-    }
-
-    /* ── Messages scroll area ─────────────────────── */
+    /* ── Messages ─────────────────────────────────── */
     #messages {
       flex: 1;
       overflow-y: auto;
@@ -255,7 +332,6 @@
     #messages::-webkit-scrollbar { width: 3px; }
     #messages::-webkit-scrollbar-thumb { background: var(--border-hard); border-radius: 2px; }
 
-    /* ── Message ──────────────────────────────────── */
     .message {
       max-width: 760px;
       width: 100%;
@@ -269,7 +345,7 @@
 
     @keyframes msgIn {
       from { opacity: 0; transform: translateY(10px) scale(0.98); }
-      to   { opacity: 1; transform: translateY(0)    scale(1); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
     }
 
     .message.user      { align-items: flex-end; }
@@ -284,25 +360,24 @@
       padding: 0 3px;
     }
 
-    /* ── Bubble (glassmorphic) ────────────────────── */
+    /* ── Bubble ───────────────────────────────────── */
     .bubble {
       max-width: min(600px, 86%);
       padding: 0.8rem 1rem;
       line-height: 1.78;
       font-size: 0.94rem;
       white-space: pre-wrap;
-      transition: background 0.35s, border-color 0.35s;
-      /* Glass */
       background: var(--surface);
       backdrop-filter: blur(12px) saturate(1.3);
       -webkit-backdrop-filter: blur(12px) saturate(1.3);
       border: 1px solid var(--border);
       border-radius: 4px;
       box-shadow: 0 2px 16px var(--shadow);
+      transition: background 0.35s, border-color 0.35s;
+      word-break: break-word;
     }
 
     .message.user .bubble {
-      border-color: var(--border);
       border-bottom-right-radius: 0;
     }
 
@@ -312,33 +387,89 @@
       box-shadow: 0 2px 16px var(--shadow), 0 0 0 1px var(--accent-dim);
     }
 
-    /* ── Typing indicator dots ────────────────────── */
-    .typing-dots {
+    /* Blinking cursor while streaming */
+    .bubble.streaming::after {
+      content: '▋';
+      display: inline;
+      color: var(--accent);
+      animation: blink-cursor 0.75s steps(1) infinite;
+      margin-left: 1px;
+    }
+
+    @keyframes blink-cursor {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0; }
+    }
+
+    /* ── Reasoning / think block ──────────────────── */
+    .think-block {
+      max-width: min(600px, 86%);
+      border: 1px solid var(--think-border);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--think-bg);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      margin-bottom: 0.25rem;
+    }
+
+    .think-summary {
+      list-style: none;
+      padding: 0.4rem 0.75rem;
+      cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 5px;
-      padding: 0.9rem 1rem;
-      min-width: 60px;
+      gap: 0.45rem;
+      user-select: none;
     }
+    .think-summary::-webkit-details-marker { display: none; }
 
-    .typing-dots span {
+    .think-chevron {
+      font-size: 0.5rem;
+      color: var(--muted);
+      transition: transform 0.2s;
       display: inline-block;
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--accent);
-      animation: dotBounce 1.3s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    .think-block[open] .think-chevron { transform: rotate(90deg); }
+
+    .think-icon {
+      font-size: 0.68rem;
+      color: var(--accent);
+      opacity: 0.75;
+      flex-shrink: 0;
     }
 
-    .typing-dots span:nth-child(2) { animation-delay: 0.18s; }
-    .typing-dots span:nth-child(3) { animation-delay: 0.36s; }
-
-    @keyframes dotBounce {
-      0%, 70%, 100% { transform: translateY(0);   opacity: 0.35; }
-      35%            { transform: translateY(-7px); opacity: 1; }
+    .think-label {
+      font-family: "Consolas", "Menlo", "Courier New", monospace;
+      font-size: 0.64rem;
+      letter-spacing: 0.08em;
+      color: var(--muted);
     }
 
-    /* ── Form shell ───────────────────────────────── */
+    .think-label.active { animation: pulse 1.2s steps(1) infinite; }
+
+    .think-body {
+      padding: 0.5rem 0.8rem 0.65rem;
+      font-family: "Consolas", "Menlo", "Courier New", monospace;
+      font-size: 0.71rem;
+      line-height: 1.65;
+      color: var(--muted);
+      border-top: 1px solid var(--think-border);
+      white-space: pre-wrap;
+      max-height: 240px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-hard) transparent;
+      word-break: break-word;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.35; }
+    }
+
+    /* ── Form ─────────────────────────────────────── */
     .form-shell {
       flex-shrink: 0;
       padding: 0.85rem 1.4rem 1.1rem;
@@ -406,13 +537,9 @@
       transition: opacity 0.15s, box-shadow 0.2s, background 0.35s, color 0.35s;
     }
 
-    button[type="submit"]:hover {
-      opacity: 0.85;
-      box-shadow: 0 0 18px var(--glow);
-    }
+    button[type="submit"]:hover { opacity: 0.85; box-shadow: 0 0 18px var(--glow); }
 
-    .htmx-request button[type="submit"],
-    button[type="submit"]:disabled {
+    body[data-streaming] button[type="submit"] {
       opacity: 0.3;
       cursor: not-allowed;
       pointer-events: none;
@@ -425,26 +552,26 @@
     <div class="hd-left">
       <div class="status-dot" title="Local inference active"></div>
       <span class="hd-title">Interview Analyzer</span>
-      <span class="hd-tag">&nbsp;· local · private · on-device</span>
+      <span class="hd-tag">&nbsp;· local · private</span>
     </div>
-    <div class="hd-right">
+
+    <div class="hd-center">
       <div id="model-loader" hx-get="/models" hx-trigger="load" hx-swap="outerHTML">
         <span class="model-loading">···</span>
       </div>
+    </div>
+
+    <div class="hd-right">
       <button id="themeBtn" aria-label="Toggle theme">
-        <!-- Sun icon — shown in dark mode to switch to light -->
         <svg class="icon-sun" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="5"/>
-          <line x1="12" y1="1"     x2="12" y2="3"/>
-          <line x1="12" y1="21"    x2="12" y2="23"/>
+          <line x1="12" y1="1"  x2="12" y2="3"/>    <line x1="12" y1="21" x2="12" y2="23"/>
           <line x1="4.22" y1="4.22"   x2="5.64" y2="5.64"/>
           <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-          <line x1="1" y1="12"     x2="3" y2="12"/>
-          <line x1="21" y1="12"    x2="23" y2="12"/>
+          <line x1="1" y1="12"  x2="3" y2="12"/>    <line x1="21" y1="12" x2="23" y2="12"/>
           <line x1="4.22" y1="19.78"  x2="5.64" y2="18.36"/>
           <line x1="18.36" y1="5.64"  x2="19.78" y2="4.22"/>
         </svg>
-        <!-- Moon icon — shown in light mode to switch to dark -->
         <svg class="icon-moon" viewBox="0 0 24 24">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
         </svg>
@@ -461,14 +588,9 @@
 
   <div class="form-shell">
     <div class="form-row">
-      <form
-        hx-post="/chat"
-        hx-target="#messages"
-        hx-swap="beforeend"
-        hx-include="#model-select"
-        hx-on::after-request="this.reset();"
-      >
+      <form id="chat-form">
         <textarea
+          id="msg-input"
           name="message"
           placeholder="Ask something about your interviews…"
           required
@@ -482,89 +604,320 @@
   </div>
 
   <script>
-    // ── Textarea auto-resize ─────────────────────────────────────
+    // ── Textarea resize ──────────────────────────────────────────
     function resize(el) {
       el.style.height = 'auto';
       el.style.height = Math.min(el.scrollHeight, 180) + 'px';
     }
 
-    // ── Theme toggle (no innerHTML — icons toggled via CSS) ──────
-    const root = document.documentElement;
-    const btn  = document.getElementById('themeBtn');
+    // ── Theme toggle ─────────────────────────────────────────────
+    const root     = document.documentElement;
+    const themeBtn = document.getElementById('themeBtn');
 
     function setTheme(t) {
       root.dataset.theme = t;
       localStorage.setItem('theme', t);
     }
 
-    btn.addEventListener('click', () =>
+    themeBtn.addEventListener('click', () =>
       setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark')
     );
-
     setTheme(localStorage.getItem('theme') || 'dark');
 
-    // ── Build a message element (DOM API — no innerHTML) ─────────
-    function makeMessage(role, text) {
-      const wrap   = document.createElement('div');
-      wrap.className = `message ${role}`;
+    // ── Custom model picker (replaces native <select>) ───────────
+    function upgradeModelSelect() {
+      const sel = document.getElementById('model-select');
+      if (!sel || document.getElementById('model-picker')) return;
 
-      const label  = document.createElement('span');
-      label.className = 'label';
-      label.textContent = role === 'user' ? 'You' : 'Analyst';
+      const options = Array.from(sel.options);
+      let current   = sel.value || options[0]?.value || '';
 
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-      bubble.textContent = text;
+      // <details> wrapper — open/close is the dropdown toggle
+      const picker = document.createElement('details');
+      picker.id        = 'model-picker';
+      picker.className = 'model-picker';
 
-      wrap.appendChild(label);
-      wrap.appendChild(bubble);
-      return wrap;
+      // Pill trigger (<summary>)
+      const summary = document.createElement('summary');
+      summary.className = 'model-pill';
+
+      const pillText = document.createElement('span');
+      pillText.className   = 'model-pill-text';
+      pillText.textContent = current;
+
+      const chevronSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      chevronSvg.setAttribute('viewBox', '0 0 24 24');
+      chevronSvg.classList.add('model-pill-chevron');
+      const chevronPath = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      chevronPath.setAttribute('points', '6 9 12 15 18 9');
+      chevronSvg.appendChild(chevronPath);
+
+      summary.appendChild(pillText);
+      summary.appendChild(chevronSvg);
+
+      // Dropdown panel
+      const panel = document.createElement('div');
+      panel.className = 'model-dropdown';
+
+      options.forEach(opt => {
+        const btn = document.createElement('button');
+        btn.type        = 'button';
+        btn.className   = 'model-option';
+        btn.textContent = opt.value;
+        if (opt.value === current) btn.dataset.selected = '';
+
+        btn.addEventListener('click', () => {
+          current          = opt.value;
+          sel.value        = opt.value;
+          pillText.textContent = opt.value;
+          panel.querySelectorAll('.model-option').forEach(b => delete b.dataset.selected);
+          btn.dataset.selected = '';
+          picker.open = false;
+        });
+        panel.appendChild(btn);
+      });
+
+      picker.appendChild(summary);
+      picker.appendChild(panel);
+
+      // Insert custom picker before the hidden select
+      sel.parentNode.insertBefore(picker, sel);
+
+      // Close on outside click
+      document.addEventListener('click', e => {
+        if (!picker.contains(e.target)) picker.open = false;
+      }, { capture: true });
     }
 
-    function makeTyping() {
-      const wrap   = document.createElement('div');
-      wrap.className = 'message assistant';
-      wrap.id = 'typing-bubble';
-
-      const label  = document.createElement('span');
-      label.className = 'label';
-      label.textContent = 'Analyst';
-
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble typing-dots';
-      for (let i = 0; i < 3; i++) bubble.appendChild(document.createElement('span'));
-
-      wrap.appendChild(label);
-      wrap.appendChild(bubble);
-      return wrap;
-    }
-
-    function hideTyping() {
-      document.getElementById('typing-bubble')?.remove();
-    }
-
-    // ── htmx event wiring ────────────────────────────────────────
-    document.body.addEventListener('htmx:beforeRequest', e => {
-      if (!e.detail.elt.closest('form')) return;
-      const msgs     = document.getElementById('messages');
-      const textarea = e.detail.elt.closest('form').querySelector('textarea');
-      const text     = textarea.value.trim();
-      // Clear immediately — don't wait for server
-      textarea.value = '';
-      resize(textarea);
-      msgs.appendChild(makeMessage('user', text));
-      msgs.appendChild(makeTyping());
-      msgs.scrollTop = 999999;
-    });
-
-    document.body.addEventListener('htmx:afterSwap', e => {
-      // Update status dot when models finish loading
+    // ── htmx: status dot + picker upgrade after model list loads ─
+    document.body.addEventListener('htmx:afterSwap', () => {
       if (!document.getElementById('model-loader')) {
         const connected = !!document.getElementById('model-select');
         document.querySelector('.status-dot').dataset.connected = connected;
+        if (connected) upgradeModelSelect();
       }
-      hideTyping();
-      document.getElementById('messages').scrollTop = 999999;
+    });
+
+    // ── <think> tag stream parser ────────────────────────────────
+    class ThinkParser {
+      constructor(onThink, onResponse) {
+        this.onThink    = onThink;
+        this.onResponse = onResponse;
+        this.inThink    = false;
+        this.buf        = '';
+      }
+
+      push(token) {
+        this.buf += token;
+        this._drain();
+      }
+
+      flush() {
+        if (!this.buf) return;
+        (this.inThink ? this.onThink : this.onResponse)(this.buf);
+        this.buf = '';
+      }
+
+      _drain() {
+        const open = '<think>', close = '</think>';
+        while (this.buf) {
+          const tag = this.inThink ? close : open;
+          const idx = this.buf.indexOf(tag);
+
+          if (idx !== -1) {
+            const before = this.buf.slice(0, idx);
+            if (before) (this.inThink ? this.onThink : this.onResponse)(before);
+            this.buf     = this.buf.slice(idx + tag.length);
+            this.inThink = !this.inThink;
+            continue;
+          }
+
+          // Hold back a possible partial tag at the tail
+          let hold = 0;
+          for (let i = tag.length - 1; i >= 1; i--) {
+            if (this.buf.endsWith(tag.slice(0, i))) { hold = i; break; }
+          }
+          const safe = this.buf.slice(0, this.buf.length - hold);
+          if (safe) (this.inThink ? this.onThink : this.onResponse)(safe);
+          this.buf = hold ? this.buf.slice(-hold) : '';
+          break;
+        }
+      }
+    }
+
+    // ── DOM helpers ──────────────────────────────────────────────
+    function makeUserMsg(text) {
+      const wrap = document.createElement('div');
+      wrap.className = 'message user';
+      const lbl = document.createElement('span');
+      lbl.className = 'label';
+      lbl.textContent = 'You';
+      const bbl = document.createElement('div');
+      bbl.className = 'bubble';
+      bbl.textContent = text;
+      wrap.appendChild(lbl);
+      wrap.appendChild(bbl);
+      return wrap;
+    }
+
+    function makeAssistantShell() {
+      const wrap = document.createElement('div');
+      wrap.className = 'message assistant';
+      const lbl = document.createElement('span');
+      lbl.className = 'label';
+      lbl.textContent = 'Analyst';
+      const bbl = document.createElement('div');
+      bbl.className = 'bubble streaming';
+      wrap.appendChild(lbl);
+      wrap.appendChild(bbl);
+      return { wrap, bubble: bbl };
+    }
+
+    function makeThinkBlock(wrap, bubble) {
+      const details = document.createElement('details');
+      details.className = 'think-block';
+      details.open = true;
+
+      const summary  = document.createElement('summary');
+      summary.className = 'think-summary';
+
+      const chevron = document.createElement('span');
+      chevron.className = 'think-chevron';
+      chevron.textContent = '▶';
+
+      const icon = document.createElement('span');
+      icon.className = 'think-icon';
+      icon.textContent = '◈';
+
+      const lbl = document.createElement('span');
+      lbl.className = 'think-label active';
+      lbl.textContent = 'Thinking…';
+
+      summary.appendChild(chevron);
+      summary.appendChild(icon);
+      summary.appendChild(lbl);
+
+      const body = document.createElement('div');
+      body.className = 'think-body';
+
+      details.appendChild(summary);
+      details.appendChild(body);
+      wrap.insertBefore(details, bubble);
+
+      return { details, body, label: lbl };
+    }
+
+    // ── Streaming chat handler ───────────────────────────────────
+    const form = document.getElementById('chat-form');
+    const msgs = document.getElementById('messages');
+
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      if (document.body.dataset.streaming) return;
+
+      const textarea = document.getElementById('msg-input');
+      const text     = textarea.value.trim();
+      if (!text) return;
+
+      // Clear input immediately
+      textarea.value = '';
+      resize(textarea);
+      document.body.dataset.streaming = '1';
+
+      // Insert user bubble
+      msgs.appendChild(makeUserMsg(text));
+
+      // Insert assistant bubble (streaming)
+      const { wrap, bubble } = makeAssistantShell();
+      msgs.appendChild(wrap);
+      msgs.scrollTop = 999999;
+
+      // Think block — created lazily on first <think> token
+      let think      = null;
+      let isThinking = false;
+
+      const parser = new ThinkParser(
+        // onThink
+        chunk => {
+          if (!think) {
+            think      = makeThinkBlock(wrap, bubble);
+            isThinking = true;
+          }
+          think.body.textContent += chunk;
+          think.body.scrollTop    = think.body.scrollHeight;
+          msgs.scrollTop          = 999999;
+        },
+        // onResponse — first response token collapses the think block
+        chunk => {
+          if (isThinking) {
+            isThinking             = false;
+            think.label.textContent = 'Reasoning';
+            think.label.classList.remove('active');
+            think.details.open     = false;
+          }
+          bubble.textContent += chunk;
+          msgs.scrollTop      = 999999;
+        }
+      );
+
+      try {
+        const fd  = new FormData();
+        fd.append('message', text);
+        const sel = document.getElementById('model-select');
+        if (sel) fd.append('model', sel.value);
+
+        const resp = await fetch('/chat', { method: 'POST', body: fd });
+        if (!resp.ok) {
+          bubble.textContent = `Error ${resp.status}: ${resp.statusText}`;
+          return;
+        }
+
+        const reader  = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let lineBuf   = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          lineBuf += decoder.decode(value, { stream: true });
+          const lines = lineBuf.split('\n');
+          lineBuf     = lines.pop(); // hold incomplete line
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const chunk = JSON.parse(line);
+              if (chunk.error) {
+                parser.flush();
+                bubble.textContent += chunk.error;
+                break;
+              }
+              // Some Ollama builds expose a native `thinking` field
+              if (chunk.thinking) {
+                if (!think) { think = makeThinkBlock(wrap, bubble); isThinking = true; }
+                think.body.textContent += chunk.thinking;
+                think.body.scrollTop    = think.body.scrollHeight;
+              }
+              if (chunk.response) parser.push(chunk.response);
+            } catch { /* partial JSON — wait for next chunk */ }
+          }
+        }
+
+        parser.flush();
+
+      } catch (err) {
+        bubble.textContent = `Connection error: ${err.message}`;
+      } finally {
+        bubble.classList.remove('streaming');
+        if (isThinking && think) {
+          think.label.textContent = 'Reasoning';
+          think.label.classList.remove('active');
+          think.details.open = false;
+        }
+        delete document.body.dataset.streaming;
+        msgs.scrollTop = 999999;
+      }
     });
   </script>
 </body>
