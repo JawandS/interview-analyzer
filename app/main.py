@@ -1,12 +1,16 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Form, Request
+from datetime import datetime, timezone
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import asyncio
+import aiosqlite
 import html
 import httpx
 import json
+import os
+from pathlib import Path
 import subprocess
 
 
@@ -18,13 +22,44 @@ def _wsl_gateway() -> str:
         return "localhost"
 
 
-OLLAMA_BASE = f"http://{_wsl_gateway()}:11434"
+OLLAMA_BASE   = f"http://{_wsl_gateway()}:11434"
 DEFAULT_MODEL = "gemma4:latest"
-KEEP_ALIVE   = "30m"
+KEEP_ALIVE    = "30m"
+DB_PATH       = Path(__file__).parent.parent / "data" / "interview-analyzer.db"
+
+
+async def _init_db():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA foreign_keys = ON")
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                title      TEXT NOT NULL DEFAULT 'New Conversation',
+                model      TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                role       TEXT NOT NULL,
+                content    TEXT NOT NULL,
+                thinking   TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        # migrate existing DBs that predate the thinking column
+        try:
+            await db.execute("ALTER TABLE messages ADD COLUMN thinking TEXT")
+        except Exception:
+            pass
+        await db.commit()
 
 
 async def _warmup():
-    """Load the default model into memory so the first request is fast."""
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             await client.post(
@@ -32,11 +67,12 @@ async def _warmup():
                 json={"model": DEFAULT_MODEL, "prompt": "", "stream": False, "keep_alive": KEEP_ALIVE, "think": True},
             )
     except Exception:
-        pass  # Ollama not running yet — fine, user will see the error on first chat
+        pass
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    await _init_db()
     asyncio.create_task(_warmup())
     yield
 
@@ -73,9 +109,95 @@ async def list_models():
         return '<span class="model-error">Ollama unreachable</span>'
 
 
+# ── Sessions ──────────────────────────────────────────────────
+
+@app.get("/sessions")
+async def list_sessions():
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT id, title, model, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
+        )
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.post("/sessions")
+async def create_session(model: str = Form(default=DEFAULT_MODEL)):
+    now = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT INTO sessions (title, model, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            ("New Conversation", model, now, now),
+        )
+        await db.commit()
+        sid = cur.lastrowid
+    return {"id": sid, "title": "New Conversation", "model": model, "created_at": now, "updated_at": now}
+
+
+@app.get("/sessions/{session_id}")
+async def get_session(session_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT id, title, model, created_at, updated_at FROM sessions WHERE id = ?",
+            (session_id,),
+        )
+        session = await cur.fetchone()
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        cur = await db.execute(
+            "SELECT role, content, thinking, created_at FROM messages WHERE session_id = ? ORDER BY id",
+            (session_id,),
+        )
+        messages = await cur.fetchall()
+    return {"session": dict(session), "messages": [dict(m) for m in messages]}
+
+
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA foreign_keys = ON")
+        await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        await db.commit()
+    return {"ok": True}
+
+
+@app.patch("/sessions/{session_id}/title")
+async def update_session_title(session_id: int, title: str = Form(...)):
+    now = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
+            (title, now, session_id),
+        )
+        await db.commit()
+    return {"ok": True}
+
+
+# ── Chat ──────────────────────────────────────────────────────
+
 @app.post("/chat")
-async def chat(message: str = Form(...), model: str = Form(default=DEFAULT_MODEL)):
+async def chat(
+    message: str = Form(...),
+    model: str = Form(default=DEFAULT_MODEL),
+    session_id: int = Form(...),
+):
+    now = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+            (session_id, "user", message, now),
+        )
+        await db.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?",
+            (now, session_id),
+        )
+        await db.commit()
+
     async def generate():
+        response_parts: list[str] = []
+        thinking_parts: list[str] = []
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
                 async with client.stream(
@@ -86,11 +208,36 @@ async def chat(message: str = Form(...), model: str = Form(default=DEFAULT_MODEL
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
                         if line:
+                            try:
+                                chunk = json.loads(line)
+                                if chunk.get("response"):
+                                    response_parts.append(chunk["response"])
+                                if chunk.get("thinking"):
+                                    thinking_parts.append(chunk["thinking"])
+                            except Exception:
+                                pass
                             yield line + "\n"
         except httpx.ConnectError:
             err = {"error": f"Could not reach Ollama at {OLLAMA_BASE}. Is the service running on Windows?"}
             yield json.dumps(err) + "\n"
+            return
         except Exception as e:
             yield json.dumps({"error": str(e)}) + "\n"
+            return
+
+        if response_parts:
+            content  = "".join(response_parts)
+            thinking = "".join(thinking_parts) or None
+            ts = datetime.now(timezone.utc).isoformat()
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute(
+                    "INSERT INTO messages (session_id, role, content, thinking, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (session_id, "assistant", content, thinking, ts),
+                )
+                await db.execute(
+                    "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                    (ts, session_id),
+                )
+                await db.commit()
 
     return StreamingResponse(generate(), media_type="application/x-ndjson")

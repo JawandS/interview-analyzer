@@ -8,7 +8,7 @@ export function resize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 180) + 'px';
 }
-window.resize = resize; // expose for inline oninput attribute
+window.resize = resize;
 
 // ── Theme toggle ─────────────────────────────────────────────
 const root     = document.documentElement;
@@ -23,6 +23,17 @@ themeBtn.addEventListener('click', () =>
   setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark')
 );
 setTheme(localStorage.getItem('theme') || 'dark');
+
+// ── Sidebar toggle ───────────────────────────────────────────
+const sidebar    = document.getElementById('sidebar');
+const sidebarBtn = document.getElementById('sidebarBtn');
+
+if (localStorage.getItem('sidebarCollapsed') === '1') sidebar.classList.add('collapsed');
+
+sidebarBtn.addEventListener('click', () => {
+  sidebar.classList.toggle('collapsed');
+  localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed') ? '1' : '0');
+});
 
 // ── Custom model picker (replaces native <select>) ───────────
 function upgradeModelSelect() {
@@ -93,6 +104,13 @@ document.body.addEventListener('htmx:afterSwap', () => {
 });
 
 // ── DOM helpers ──────────────────────────────────────────────
+const msgs = document.getElementById('messages');
+
+const GREETING = `<div class="message assistant">
+  <span class="label">Analyst</span>
+  <div class="bubble">Hello. I'm ready to help you analyze your interview corpus. What would you like to explore?</div>
+</div>`;
+
 function makeUserMsg(text) {
   const wrap = document.createElement('div');
   wrap.className = 'message user';
@@ -154,9 +172,120 @@ function makeThinkBlock(wrap, bubble) {
   return { details, body, label: lbl };
 }
 
+// ── Session management ───────────────────────────────────────
+let currentSessionId = null;
+
+function formatDate(iso) {
+  const d    = new Date(iso);
+  const now  = new Date();
+  const days = Math.floor((now - d) / 86400000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7)  return d.toLocaleDateString('en', { weekday: 'short' });
+  return d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+}
+
+async function loadSessions() {
+  const resp     = await fetch('/sessions');
+  const sessions = await resp.json();
+  renderSessionList(sessions);
+}
+
+function renderSessionList(sessions) {
+  const list = document.getElementById('sessionList');
+  list.innerHTML = '';
+  sessions.forEach(s => {
+    const item = document.createElement('div');
+    item.className = 'session-item' + (s.id === currentSessionId ? ' active' : '');
+    item.dataset.id = s.id;
+
+    const info  = document.createElement('div');
+    info.className = 'session-info';
+
+    const title = document.createElement('div');
+    title.className   = 'session-title';
+    title.textContent = s.title;
+
+    const date = document.createElement('div');
+    date.className   = 'session-date';
+    date.textContent = formatDate(s.updated_at);
+
+    info.appendChild(title);
+    info.appendChild(date);
+
+    const del = document.createElement('button');
+    del.className   = 'session-delete';
+    del.title       = 'Delete';
+    del.textContent = '×';
+    del.addEventListener('click', async e => {
+      e.stopPropagation();
+      await fetch(`/sessions/${s.id}`, { method: 'DELETE' });
+      if (currentSessionId === s.id) startNewChat();
+      await loadSessions();
+    });
+
+    item.appendChild(info);
+    item.appendChild(del);
+    item.addEventListener('click', () => loadSession(s.id));
+    list.appendChild(item);
+  });
+}
+
+async function loadSession(id) {
+  const resp = await fetch(`/sessions/${id}`);
+  const data = await resp.json();
+  currentSessionId = id;
+
+  msgs.innerHTML = '';
+  data.messages.forEach(m => {
+    if (m.role === 'user') {
+      msgs.appendChild(makeUserMsg(m.content));
+    } else {
+      const { wrap, bubble } = makeAssistantShell();
+      if (m.thinking) {
+        const t = makeThinkBlock(wrap, bubble);
+        t.body.textContent  = m.thinking;
+        t.label.textContent = 'Reasoning';
+        t.label.classList.remove('active');
+        t.details.open      = false;
+      }
+      bubble.innerHTML = marked.parse(m.content);
+      bubble.classList.remove('streaming');
+      msgs.appendChild(wrap);
+    }
+  });
+  msgs.scrollTop = 999999;
+
+  document.querySelectorAll('.session-item').forEach(el => {
+    el.classList.toggle('active', parseInt(el.dataset.id) === id);
+  });
+}
+
+function startNewChat() {
+  currentSessionId = null;
+  msgs.innerHTML   = GREETING;
+  document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('msg-input').focus();
+}
+
+document.getElementById('newChatBtn').addEventListener('click', startNewChat);
+
+async function createSession(model) {
+  const fd = new FormData();
+  if (model) fd.append('model', model);
+  const resp = await fetch('/sessions', { method: 'POST', body: fd });
+  return resp.json();
+}
+
+async function setSessionTitle(sessionId, firstMessage) {
+  const title = firstMessage.slice(0, 48).trim() + (firstMessage.length > 48 ? '…' : '');
+  const fd    = new FormData();
+  fd.append('title', title);
+  await fetch(`/sessions/${sessionId}/title`, { method: 'PATCH', body: fd });
+}
+
 // ── Streaming chat handler ───────────────────────────────────
 const form = document.getElementById('chat-form');
-const msgs = document.getElementById('messages');
 let modelReady = false;
 
 form.addEventListener('submit', async e => {
@@ -170,6 +299,17 @@ form.addEventListener('submit', async e => {
   textarea.value = '';
   resize(textarea);
   document.body.dataset.streaming = '1';
+
+  // Create session on first message
+  const isNew = !currentSessionId;
+  if (isNew) {
+    const sel   = document.getElementById('model-select');
+    const model = sel?.value || '';
+    const s     = await createSession(model);
+    currentSessionId = s.id;
+    setSessionTitle(currentSessionId, text);
+    loadSessions();
+  }
 
   msgs.appendChild(makeUserMsg(text));
 
@@ -212,6 +352,7 @@ form.addEventListener('submit', async e => {
   try {
     const fd  = new FormData();
     fd.append('message', text);
+    fd.append('session_id', currentSessionId);
     const sel = document.getElementById('model-select');
     if (sel) fd.append('model', sel.value);
 
@@ -274,5 +415,9 @@ form.addEventListener('submit', async e => {
     }
     delete document.body.dataset.streaming;
     msgs.scrollTop = 999999;
+    loadSessions();
   }
 });
+
+// ── Init ─────────────────────────────────────────────────────
+loadSessions();

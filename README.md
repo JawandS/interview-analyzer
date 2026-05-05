@@ -46,6 +46,8 @@ uv sync
 uv run python main.py
 ```
 
+The app starts at `http://localhost:8000`. The SQLite database (`data/interview-analyzer.db`) is created automatically on first run and is gitignored.
+
 ---
 
 ## Purpose
@@ -87,3 +89,4 @@ CPU inference is available as a fallback via `OLLAMA_NUM_GPU=0`.
 - **Local-only**: all inference runs on-device
 - **Privacy-first**: no API calls to external services
 - **Quality over speed**: batch analysis, not real-time chat — prioritize model quality
+- **Persistent history**: conversations are saved to a local SQLite database; past sessions are accessible via the sidebar

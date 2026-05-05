@@ -47,6 +47,188 @@ body {
   display: flex;
   flex-direction: column;
   transition: background-color 0.35s, color 0.35s;
+  overflow: hidden;
+}
+
+/* ── App body (sidebar + main) ────────────────── */
+.app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Sidebar ──────────────────────────────────── */
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-hard);
+  background: var(--surface-solid);
+  overflow: hidden;
+  transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 0.22s,
+              border-color 0.35s,
+              background 0.35s;
+}
+
+.sidebar.collapsed {
+  width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-top {
+  padding: 0.65rem 0.55rem;
+  border-bottom: 1px solid var(--border-hard);
+  flex-shrink: 0;
+  transition: border-color 0.35s;
+}
+
+.new-chat-btn {
+  display: block;
+  width: 100%;
+  padding: 0.42rem 0.7rem;
+  background: var(--accent-dim);
+  border: 1px solid var(--border-hard);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: "Consolas", "Menlo", "Courier New", monospace;
+  font-size: 0.63rem;
+  letter-spacing: 0.08em;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, color 0.35s, background 0.35s;
+  white-space: nowrap;
+}
+
+.new-chat-btn:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--glow);
+}
+
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.35rem 0.4rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-hard) transparent;
+}
+
+.session-list::-webkit-scrollbar { width: 3px; }
+.session-list::-webkit-scrollbar-thumb { background: var(--border-hard); border-radius: 2px; }
+
+.session-item {
+  padding: 0.44rem 0.55rem;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  margin-bottom: 1px;
+  border-left: 2px solid transparent;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.session-item:hover {
+  background: var(--accent-dim);
+}
+
+.session-item.active {
+  background: var(--accent-dim);
+  border-left-color: var(--accent);
+}
+
+.session-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.session-title {
+  font-family: "Consolas", "Menlo", "Courier New", monospace;
+  font-size: 0.63rem;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.35s;
+}
+
+.session-date {
+  font-family: "Consolas", "Menlo", "Courier New", monospace;
+  font-size: 0.56rem;
+  color: var(--muted);
+  margin-top: 0.12rem;
+  transition: color 0.35s;
+}
+
+.session-delete {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.session-item:hover .session-delete { display: flex; }
+
+.session-delete:hover {
+  color: #c0504a;
+  background: rgba(192, 80, 74, 0.12);
+}
+
+/* ── Main column ──────────────────────────────── */
+.main-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ── Icon button (sidebar toggle) ─────────────── */
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 5px;
+  border: 1px solid var(--border-hard);
+  background: transparent;
+  cursor: pointer;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: border-color 0.2s, color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+.icon-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+  box-shadow: 0 0 8px var(--glow);
+}
+
+.icon-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
 }
 
 body::before, body::after {

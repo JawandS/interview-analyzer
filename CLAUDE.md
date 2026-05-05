@@ -24,7 +24,25 @@ uv run pytest tests/test_foo.py::test_name  # run a single test
 
 **Python version:** 3.11 (pinned in `.python-version`). Package manager is `uv`.
 
+**Session persistence:** SQLite database at `data/interview-analyzer.db` (gitignored). Schema: `sessions` (id, title, model, created_at, updated_at) and `messages` (id, session_id, role, content, created_at). DB is auto-created on first run via `_init_db()` in the lifespan handler.
+
+**Frontend:** Vanilla JS ES modules, htmx for model picker, `marked` (CDN) for markdown rendering. No build step. Sidebar session history, theme toggle, custom model picker, streaming with think-block support.
+
+## API endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/` | Serve UI |
+| GET | `/models` | HTMX fragment: model `<select>` |
+| GET | `/sessions` | List all sessions (newest first) |
+| POST | `/sessions` | Create session; body: `model` |
+| GET | `/sessions/{id}` | Session + all messages |
+| DELETE | `/sessions/{id}` | Delete session and its messages |
+| PATCH | `/sessions/{id}/title` | Update title; body: `title` |
+| POST | `/chat` | Stream response; body: `message`, `model`, `session_id` |
+
 ## Constraints
 
 - No external API calls for inference — Ollama only
 - Python 3.11+, managed with `uv`
+- `data/` is gitignored — never commit the SQLite file
