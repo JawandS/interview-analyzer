@@ -29,7 +29,7 @@ async def _warmup():
         async with httpx.AsyncClient(timeout=60.0) as client:
             await client.post(
                 f"{OLLAMA_BASE}/api/generate",
-                json={"model": DEFAULT_MODEL, "prompt": "", "stream": False, "keep_alive": KEEP_ALIVE},
+                json={"model": DEFAULT_MODEL, "prompt": "", "stream": False, "keep_alive": KEEP_ALIVE, "think": True},
             )
     except Exception:
         pass  # Ollama not running yet — fine, user will see the error on first chat
@@ -81,7 +81,7 @@ async def chat(message: str = Form(...), model: str = Form(default=DEFAULT_MODEL
                 async with client.stream(
                     "POST",
                     f"{OLLAMA_BASE}/api/generate",
-                    json={"model": model, "prompt": message, "stream": True, "keep_alive": KEEP_ALIVE},
+                    json={"model": model, "prompt": message, "stream": True, "keep_alive": KEEP_ALIVE, "think": True},
                 ) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
