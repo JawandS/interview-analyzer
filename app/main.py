@@ -1,15 +1,13 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import asyncio
 import html
 import httpx
 import json
 import subprocess
-
-app = FastAPI(title="Interview Analyzer")
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _wsl_gateway() -> str:
@@ -22,6 +20,30 @@ def _wsl_gateway() -> str:
 
 OLLAMA_BASE = f"http://{_wsl_gateway()}:11434"
 DEFAULT_MODEL = "gemma4:latest"
+KEEP_ALIVE   = "30m"
+
+
+async def _warmup():
+    """Load the default model into memory so the first request is fast."""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            await client.post(
+                f"{OLLAMA_BASE}/api/generate",
+                json={"model": DEFAULT_MODEL, "prompt": "", "stream": False, "keep_alive": KEEP_ALIVE},
+            )
+    except Exception:
+        pass  # Ollama not running yet — fine, user will see the error on first chat
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    asyncio.create_task(_warmup())
+    yield
+
+
+app = FastAPI(title="Interview Analyzer", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+templates = Jinja2Templates(directory="app/templates")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -59,7 +81,7 @@ async def chat(message: str = Form(...), model: str = Form(default=DEFAULT_MODEL
                 async with client.stream(
                     "POST",
                     f"{OLLAMA_BASE}/api/generate",
-                    json={"model": model, "prompt": message, "stream": True},
+                    json={"model": model, "prompt": message, "stream": True, "keep_alive": KEEP_ALIVE},
                 ) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
