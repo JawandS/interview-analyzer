@@ -1,4 +1,7 @@
 import { ThinkParser } from './think-parser.js';
+import { marked } from 'https://esm.sh/marked@15';
+
+marked.use({ breaks: true });
 
 // ── Textarea resize ──────────────────────────────────────────
 export function resize(el) {
@@ -154,6 +157,7 @@ function makeThinkBlock(wrap, bubble) {
 // ── Streaming chat handler ───────────────────────────────────
 const form = document.getElementById('chat-form');
 const msgs = document.getElementById('messages');
+let modelReady = false;
 
 form.addEventListener('submit', async e => {
   e.preventDefault();
@@ -173,9 +177,10 @@ form.addEventListener('submit', async e => {
   msgs.appendChild(wrap);
   msgs.scrollTop = 999999;
 
-  let firstToken = false;
+  let firstToken   = false;
+  let responseText = '';
   const loadingHint = setTimeout(() => {
-    if (!firstToken) bubble.textContent = 'Loading model…';
+    if (!firstToken && !modelReady) bubble.textContent = 'Loading model…';
   }, 1500);
 
   let think      = null;
@@ -198,7 +203,8 @@ form.addEventListener('submit', async e => {
         think.label.classList.remove('active');
         think.details.open      = false;
       }
-      bubble.textContent += chunk;
+      responseText       += chunk;
+      bubble.innerHTML    = marked.parse(responseText);
       msgs.scrollTop      = 999999;
     }
   );
@@ -243,9 +249,10 @@ form.addEventListener('submit', async e => {
           }
           if (chunk.response) {
             if (!firstToken) {
-              firstToken = true;
+              firstToken        = true;
+              modelReady        = true;
               clearTimeout(loadingHint);
-              if (bubble.textContent === 'Loading model…') bubble.textContent = '';
+              bubble.textContent = '';
             }
             parser.push(chunk.response);
           }
