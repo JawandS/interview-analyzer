@@ -87,6 +87,7 @@
 .modal-body {
   flex: 1;
   overflow-y: auto;
+  max-width: none;
   padding: 1.2rem 1.4rem;
   scrollbar-width: thin;
   scrollbar-color: var(--border-hard) transparent;

@@ -82,6 +82,9 @@
 .think-body.rendered { white-space: normal; }
 .think-body.rendered p { margin-bottom: 0.5em; }
 .think-body.rendered p:last-child { margin-bottom: 0; }
+.think-body.rendered ul,
+.think-body.rendered ol { padding-left: 1.4em; margin-bottom: 0.5em; }
+.think-body.rendered li { margin-bottom: 0.2em; }
 .think-body.rendered strong { color: var(--text); }
 .think-body.rendered code {
   font-size: 0.9em;
