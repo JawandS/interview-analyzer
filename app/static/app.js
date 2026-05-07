@@ -1,7 +1,38 @@
 import { ThinkParser } from './think-parser.js';
-import { marked } from 'https://esm.sh/marked@15';
+
+// ── Rendering (markdown + LaTeX) ─────────────────────────────
+const marked = window.marked;
+const katex  = window.katex;
 
 marked.use({ breaks: true });
+
+function renderContent(text) {
+  // Extract math blocks before marked sees them so it can't mangle
+  // underscore/asterisk characters inside LaTeX expressions.
+  const blocks = [];
+  const save = (math, display) => {
+    const id = blocks.length;
+    blocks.push({ math, display });
+    return `MATHPLACEHOLDER_${id}_END`;
+  };
+
+  const preprocessed = text
+    .replace(/\$\$([\s\S]*?)\$\$/g,  (_, m) => save(m, true))
+    .replace(/\$([^\n$`]+?)\$/g,     (_, m) => save(m, false));
+
+  let html = marked.parse(preprocessed);
+
+  blocks.forEach(({ math, display }, id) => {
+    const rendered = katex.renderToString(math.trim(), {
+      throwOnError: false,
+      displayMode: display,
+    });
+    // split/join avoids regex issues with special chars in rendered HTML
+    html = html.split(`MATHPLACEHOLDER_${id}_END`).join(rendered);
+  });
+
+  return html;
+}
 
 // ── Textarea resize ──────────────────────────────────────────
 export function resize(el) {
@@ -22,7 +53,7 @@ function setTheme(t) {
 themeBtn.addEventListener('click', () =>
   setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark')
 );
-setTheme(localStorage.getItem('theme') || 'light');
+setTheme(localStorage.getItem('theme') || 'dark');
 
 // ── Sidebar toggle ───────────────────────────────────────────
 const sidebar    = document.getElementById('sidebar');
@@ -235,15 +266,6 @@ function renderSessionList(sessions) {
     info.appendChild(title);
     info.appendChild(date);
 
-    const ren = document.createElement('button');
-    ren.className   = 'session-rename';
-    ren.title       = 'Rename';
-    ren.innerHTML   = '&#9998;';
-    ren.addEventListener('click', e => {
-      e.stopPropagation();
-      startRename(item, title, s.id);
-    });
-
     const del = document.createElement('button');
     del.className   = 'session-delete';
     del.title       = 'Delete';
@@ -256,37 +278,10 @@ function renderSessionList(sessions) {
     });
 
     item.appendChild(info);
-    item.appendChild(ren);
     item.appendChild(del);
     item.addEventListener('click', () => loadSession(s.id));
     list.appendChild(item);
   });
-}
-
-function startRename(item, titleEl, sessionId) {
-  const current = titleEl.textContent;
-  const input = document.createElement('input');
-  input.className = 'session-rename-input';
-  input.value = current;
-  titleEl.replaceWith(input);
-  input.focus();
-  input.select();
-
-  async function commit() {
-    const newTitle = input.value.trim() || current;
-    if (newTitle !== current) {
-      const fd = new FormData();
-      fd.append('title', newTitle);
-      await fetch(`/sessions/${sessionId}/title`, { method: 'PATCH', body: fd });
-    }
-    await loadSessions();
-  }
-
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); commit(); }
-    if (e.key === 'Escape') { input.replaceWith(titleEl); }
-  });
-  input.addEventListener('blur', commit);
 }
 
 async function loadSession(id) {
@@ -302,12 +297,13 @@ async function loadSession(id) {
       const { wrap, bubble } = makeAssistantShell();
       if (m.thinking) {
         const t = makeThinkBlock(wrap, bubble);
-        t.body.textContent  = m.thinking;
+        t.body.innerHTML = renderContent(m.thinking);
+        t.body.classList.add('rendered');
         t.label.textContent = 'Reasoning';
         t.label.classList.remove('active');
         t.details.open      = false;
       }
-      bubble.innerHTML = marked.parse(m.content);
+      bubble.innerHTML = renderContent(m.content);
       bubble.classList.remove('streaming');
       msgs.appendChild(wrap);
     }
@@ -377,6 +373,7 @@ form.addEventListener('submit', async e => {
 
   let firstToken   = false;
   let responseText = '';
+  let thinkText    = '';
   const loadingHint = setTimeout(() => {
     if (!firstToken && !modelReady) bubble.textContent = 'Loading model…';
   }, 1500);
@@ -390,6 +387,7 @@ form.addEventListener('submit', async e => {
         think      = makeThinkBlock(wrap, bubble);
         isThinking = true;
       }
+      thinkText += chunk;
       think.body.textContent += chunk;
       think.body.scrollTop    = think.body.scrollHeight;
       notifyNewToken();
@@ -401,8 +399,8 @@ form.addEventListener('submit', async e => {
         think.label.classList.remove('active');
         think.details.open      = false;
       }
-      responseText       += chunk;
-      bubble.innerHTML    = marked.parse(responseText);
+      responseText    += chunk;
+      bubble.innerHTML = marked.parse(responseText);
       notifyNewToken();
     }
   );
@@ -443,6 +441,7 @@ form.addEventListener('submit', async e => {
           }
           if (chunk.thinking) {
             if (!think) { think = makeThinkBlock(wrap, bubble); isThinking = true; }
+            thinkText += chunk.thinking;
             think.body.textContent += chunk.thinking;
             think.body.scrollTop    = think.body.scrollHeight;
           }
@@ -465,6 +464,14 @@ form.addEventListener('submit', async e => {
     bubble.textContent = `Connection error: ${err.message}`;
   } finally {
     clearTimeout(loadingHint);
+
+    // Full markdown+LaTeX render once streaming is complete
+    if (responseText) bubble.innerHTML = renderContent(responseText);
+    if (think && thinkText) {
+      think.body.innerHTML = renderContent(thinkText);
+      think.body.classList.add('rendered');
+    }
+
     bubble.classList.remove('streaming');
     if (isThinking && think) {
       think.label.textContent = 'Reasoning';
@@ -602,12 +609,12 @@ function openModal(title, content) {
   modalTitle.textContent = title;
   modalBody.innerHTML = content === null
     ? '<span class="modal-loading">Generating summary…</span>'
-    : marked.parse(content);
+    : renderContent(content);
   modalOverlay.classList.add('open');
 }
 
 function showModalContent(content) {
-  modalBody.innerHTML = marked.parse(content);
+  modalBody.innerHTML = renderContent(content);
 }
 
 function closeModal() {
