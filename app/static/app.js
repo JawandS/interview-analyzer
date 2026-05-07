@@ -852,6 +852,21 @@ async function themeDocument(filename, btn) {
   btn.textContent = '···';
 
   const title = filename.replace(/\.pdf$/i, '');
+
+  try {
+    const cached = await fetch(`/documents/${encodeURIComponent(filename)}/themes`);
+    if (cached.ok) {
+      const data = await cached.json();
+      modalTitle.textContent = 'Themes — ' + title;
+      modalBody.innerHTML = '';
+      modalOverlay.classList.add('open');
+      showThemesList(data.themes);
+      btn.disabled = false;
+      btn.textContent = 'Themes';
+      return;
+    }
+  } catch { }
+
   openModal('Themes — ' + title, null);
 
   try {
