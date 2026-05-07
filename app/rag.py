@@ -145,7 +145,9 @@ async def retrieve(query: str, ollama_base: str, n: int = 5) -> list[dict]:
         CHROMA_DIR.mkdir(parents=True, exist_ok=True)
         client = chromadb.PersistentClient(path=str(CHROMA_DIR))
         collections = client.list_collections()
-        all_results = []
+
+        # Collect top-n candidates from each collection separately
+        per_col: list[list[dict]] = []
         for col_meta in collections:
             try:
                 col = client.get_collection(col_meta.name)
@@ -158,17 +160,38 @@ async def retrieve(query: str, ollama_base: str, n: int = 5) -> list[dict]:
                 n_results=min(n, col.count()),
                 include=["documents", "metadatas", "distances"],
             )
-            for text, meta, dist in zip(
-                res["documents"][0], res["metadatas"][0], res["distances"][0]
-            ):
-                all_results.append({
+            col_results = [
+                {
                     "text": text,
                     "source": meta.get("source", col_meta.name),
                     "chunk_index": meta.get("chunk_index", 0),
                     "distance": dist,
-                })
-        all_results.sort(key=lambda x: x["distance"])
-        return all_results[:n]
+                }
+                for text, meta, dist in zip(
+                    res["documents"][0], res["metadatas"][0], res["distances"][0]
+                )
+            ]
+            col_results.sort(key=lambda x: x["distance"])
+            per_col.append(col_results)
+
+        if not per_col:
+            return []
+
+        # Guarantee at least one chunk per collection, fill remaining slots globally
+        guaranteed = max(1, n // len(per_col))
+        selected: list[dict] = []
+        remainder: list[dict] = []
+        for col_results in per_col:
+            selected.extend(col_results[:guaranteed])
+            remainder.extend(col_results[guaranteed:])
+
+        remaining_slots = n - len(selected)
+        if remaining_slots > 0:
+            remainder.sort(key=lambda x: x["distance"])
+            selected.extend(remainder[:remaining_slots])
+
+        selected.sort(key=lambda x: x["distance"])
+        return selected[:n]
 
     try:
         return await asyncio.to_thread(_query)

@@ -12,7 +12,10 @@
       "Bash(Sort-Object FullName)",
       "Bash(Get-Content \"C:\\\\Users\\\\jawan\\\\Desktop\\\\code\\\\interview-analyzer\\\\app\\\\static\\\\style.css\")",
       "Bash(Select-String -Pattern \"doc\")",
-      "Bash(Select-Object -First 40)"
+      "Bash(Select-Object -First 40)",
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\jawan\\\\Desktop\\\\code\\\\interview-analyzer\\\\data\\\\chroma\" -Recurse -Depth 2)",
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(Format-Table)"
     ]
   }
 }
