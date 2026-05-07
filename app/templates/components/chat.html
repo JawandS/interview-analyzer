@@ -1,0 +1,26 @@
+<div class="main-col">
+  <button id="jumpBtn" class="jump-btn" aria-label="Catch up to latest">↓ Catch up</button>
+  <div id="messages">
+    <div class="message assistant">
+      <span class="label">Analyst</span>
+      <div class="bubble">Hello. I'm ready to help you analyze your interview corpus. What would you like to explore?</div>
+    </div>
+  </div>
+
+  <div class="form-shell">
+    <div class="form-row">
+      <form id="chat-form">
+        <textarea
+          id="msg-input"
+          name="message"
+          placeholder="Ask something about your interviews…"
+          required
+          rows="1"
+          oninput="resize(this)"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.form.requestSubmit();}"
+        ></textarea>
+        <button type="submit">Send</button>
+      </form>
+    </div>
+  </div>
+</div>
