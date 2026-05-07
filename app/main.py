@@ -397,11 +397,19 @@ async def chat(
         await db.commit()
 
     chunks = await rag.retrieve(message, OLLAMA_BASE)
-    system_prompt = (
-        "You are analyzing an ethnographic interview corpus. "
-        "Use the following excerpts to inform your response:\n\n"
-        + "\n\n---\n\n".join(chunks)
-    ) if chunks else None
+    if chunks:
+        excerpt_lines = [
+            f"[Source: {c['source']}, excerpt {c['chunk_index']}]\n{c['text']}"
+            for c in chunks
+        ]
+        system_prompt = (
+            "You are analyzing an ethnographic interview corpus. "
+            "Use the following excerpts to inform your response. "
+            "Whenever you draw on an excerpt, cite it using the format (Source: filename).\n\n"
+            + "\n\n---\n\n".join(excerpt_lines)
+        )
+    else:
+        system_prompt = None
 
     async def generate():
         response_parts: list[str] = []
