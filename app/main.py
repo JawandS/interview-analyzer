@@ -34,6 +34,8 @@ KEEP_ALIVE    = -1
 DB_PATH       = Path(__file__).parent.parent / "data" / "interview-analyzer.db"
 SUMMARIES_DIR   = Path(__file__).parent.parent / "data" / "summaries"
 EXTRACTIONS_DIR = Path(__file__).parent.parent / "data" / "extractions"
+THEMES_DIR       = Path(__file__).parent.parent / "data" / "themes"
+CORPUS_THEMES_PATH = Path(__file__).parent.parent / "data" / "corpus_themes.json"
 MAPS_DIR        = Path(__file__).parent.parent / "data" / "maps"
 SETTINGS_PATH   = Path(__file__).parent.parent / "data" / "settings.json"
 
@@ -83,6 +85,13 @@ async def _init_db():
             await db.execute("ALTER TABLE messages ADD COLUMN thinking TEXT")
         except Exception:
             pass
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS document_themes (
+                filename     TEXT PRIMARY KEY,
+                themes_json  TEXT NOT NULL,
+                extracted_at TEXT NOT NULL
+            )
+        """)
         await db.commit()
 
 
@@ -370,6 +379,96 @@ Extraction notes:
 {notes}"""
 
 
+_THEMES_MAP_PROMPT = """\
+You are analyzing an excerpt from an ethnographic interview transcript.
+Identify any distinct thematic concepts present in this passage. A theme is a recurring \
+idea, concern, tension, or value — not a topic heading. Examples: "land access anxiety", \
+"distrust of government programs", "pride in generational continuity".
+
+For each theme you find, output one line in this exact format:
+THEME: <short label (2-5 words)> | QUOTE: <short supporting quote, verbatim, under 20 words>
+
+If nothing thematic is present, return "nothing notable."
+
+Passage {i}/{n}:
+{text}"""
+
+_THEMES_REDUCE_PROMPT = """\
+You are consolidating thematic analysis notes from an ethnographic interview transcript.
+Below are theme observations from every section of the document.
+Merge duplicates (same concept, different wording), count how many section batches mention each theme, \
+and select the best supporting quote for each.
+
+Return ONLY a valid JSON array in this exact schema — no prose, no explanation:
+[
+  {{"name": "<theme label>", "mentions": <integer count>, "quote": "<best supporting quote>"}},
+  ...
+]
+
+Observations:
+{notes}"""
+
+
+def _parse_themes_json(text: str) -> list:
+    try:
+        data = json.loads(text.strip())
+        if isinstance(data, list):
+            return data
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r'\[[\s\S]*\]', text)
+    if match:
+        try:
+            data = json.loads(match.group())
+            if isinstance(data, list):
+                return data
+        except json.JSONDecodeError:
+            pass
+    return []
+
+
+_CORPUS_KEYWORDS = re.compile(
+    r'\b(across|all (documents|interviews|files)|corpus|recurring|common theme|how many|pattern|frequency)\b',
+    re.I
+)
+
+_CORPUS_DOC_BATCH = 5  # documents per corpus map batch
+
+_CORPUS_MAP_PROMPT = """\
+You are analyzing themes extracted from a batch of ethnographic interview documents.
+Your job is to normalize theme labels to a shared vocabulary — merge near-synonyms \
+(e.g. "irrigation challenges" and "water access difficulty" → "water access") and \
+identify which canonical themes appear across this batch.
+
+For each canonical theme, output one line:
+THEME: <canonical label (2-5 words)> | DOCS: <comma-separated filenames> | MENTIONS: <total count> | QUOTE: <best quote, under 20 words>
+
+Input — per-document theme lists:
+{doc_themes}"""
+
+_CORPUS_REDUCE_PROMPT = """\
+You are synthesizing cross-document theme analysis for an ethnographic interview corpus.
+Below are normalized theme observations from batches of documents. \
+Merge overlapping themes, sum document counts and mention counts, and select the best quote for each.
+
+Return ONLY a valid JSON array, no prose:
+[
+  {{
+    "name": "<canonical theme label>",
+    "doc_count": <integer — number of distinct documents>,
+    "total_mentions": <integer>,
+    "examples": [<list of filenames>],
+    "quote": "<best supporting quote>"
+  }},
+  ...
+]
+
+Sort by doc_count descending. Include all themes that appear in at least one document.
+
+Batch observations:
+{notes}"""
+
+
 def _parse_extraction_json(text: str) -> dict:
     blank = {"acreage": None, "grant_status": None, "generational_status": None, "farm_type": None, "notes": ""}
     try:
@@ -589,6 +688,281 @@ async def create_summary(
     return StreamingResponse(generate(), media_type="application/x-ndjson")
 
 
+# ── Document themes ─────────────────────────────────────────
+
+@app.get("/documents/{filename}/themes")
+async def get_themes(filename: str):
+    stem = Path(filename).stem
+    theme_path = THEMES_DIR / f"{stem}.json"
+    if theme_path.exists():
+        return {"themes": json.loads(theme_path.read_text(encoding="utf-8")), "cached": True}
+    raise HTTPException(status_code=404, detail="No themes cached")
+
+
+@app.post("/documents/{filename}/themes")
+async def create_themes(
+    filename: str,
+    model: str = Form(default=DEFAULT_MODEL),
+    regenerate: bool = Query(default=False),
+):
+    pdf_path = rag.DATA_DIR / filename
+    if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    stem = Path(filename).stem
+    theme_path = THEMES_DIR / f"{stem}.json"
+
+    async def generate():
+        if theme_path.exists() and not regenerate:
+            yield json.dumps({"stage": "cached", "themes": json.loads(theme_path.read_text(encoding="utf-8"))}) + "\n"
+            return
+
+        chunks = await rag.get_chunks_for_document(filename)
+        if not chunks:
+            def _read_pdf():
+                doc = fitz.open(str(pdf_path))
+                return "".join(page.get_text() for page in doc)
+            text = await asyncio.to_thread(_read_pdf)
+            chunks = [c.strip() for c in rag._chunk(text) if c.strip()]
+
+        batches = [chunks[i:i + _MAP_BATCH_SIZE] for i in range(0, len(chunks), _MAP_BATCH_SIZE)]
+        n = len(batches)
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _run_map(client: httpx.AsyncClient, idx: int, batch: list[str]) -> None:
+            prompt = _THEMES_MAP_PROMPT.format(i=idx + 1, n=n, text="\n".join(batch))
+            try:
+                resp = await client.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE},
+                )
+                resp.raise_for_status()
+                out = resp.json().get("response", "").strip()
+            except Exception as e:
+                logger.warning("Themes map %d/%d failed for %s: %r", idx + 1, n, filename, e)
+                out = "nothing notable."
+            await queue.put((idx, out))
+
+        cached_map = None if regenerate else _load_map_cache(filename, "themes")
+        if cached_map is not None:
+            map_results = cached_map
+            yield json.dumps({"stage": "map_cached", "total": len(map_results)}) + "\n"
+        else:
+            map_results = ["nothing notable."] * n
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                tasks = [asyncio.create_task(_run_map(client, i, batch)) for i, batch in enumerate(batches)]
+                for done in range(1, n + 1):
+                    idx, out = await queue.get()
+                    map_results[idx] = out
+                    yield json.dumps({"stage": "map", "batch": done, "total": n}) + "\n"
+                await asyncio.gather(*tasks)
+            _save_map_cache(filename, "themes", map_results)
+
+        map_outputs = [
+            f"[Batch {i + 1}/{n}]\n{out}"
+            for i, out in enumerate(map_results)
+            if out and out.lower() != "nothing notable."
+        ]
+        notes = "\n\n".join(map_outputs) if map_outputs else "No themes identified."
+
+        yield json.dumps({"stage": "reduce"}) + "\n"
+
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                resp = await client.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": _THEMES_REDUCE_PROMPT.format(notes=notes), "stream": False, "keep_alive": KEEP_ALIVE},
+                )
+                resp.raise_for_status()
+                raw = resp.json().get("response", "").strip()
+        except Exception as e:
+            logger.error("Themes reduce failed for %s: %r", filename, e)
+            yield json.dumps({"error": repr(e)}) + "\n"
+            return
+
+        themes = _parse_themes_json(raw)
+        THEMES_DIR.mkdir(parents=True, exist_ok=True)
+        theme_path.write_text(json.dumps(themes, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        now = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO document_themes (filename, themes_json, extracted_at) VALUES (?, ?, ?)",
+                (filename, json.dumps(themes, ensure_ascii=False), now),
+            )
+            await db.commit()
+
+        yield json.dumps({"stage": "done", "themes": themes}) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+
+def _sql_aggregate_themes(rows) -> dict:
+    """Fallback: naive string-match aggregation when LLM corpus pass hasn't run."""
+    aggregated: dict[str, dict] = {}
+    docs_with_themes = 0
+    for row in rows:
+        try:
+            themes = json.loads(row["themes_json"])
+        except Exception:
+            continue
+        if not themes:
+            continue
+        docs_with_themes += 1
+        for t in themes:
+            name = (t.get("name") or "").strip().lower()
+            if not name:
+                continue
+            if name not in aggregated:
+                aggregated[name] = {
+                    "name": t.get("name", name),
+                    "doc_count": 0,
+                    "total_mentions": 0,
+                    "examples": [],
+                    "quote": t.get("quote", ""),
+                }
+            entry = aggregated[name]
+            entry["doc_count"] += 1
+            entry["total_mentions"] += int(t.get("mentions", 1))
+            entry["examples"].append(row["filename"])
+            if not entry["quote"] and t.get("quote"):
+                entry["quote"] = t["quote"]
+    ranked = sorted(aggregated.values(), key=lambda x: (-x["doc_count"], -x["total_mentions"]))
+    return {"themes": ranked, "documents_analyzed": len(rows), "documents_with_themes": docs_with_themes}
+
+
+@app.get("/corpus/themes")
+async def corpus_themes():
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT filename, themes_json FROM document_themes")
+        rows = await cur.fetchall()
+
+    if not rows:
+        return {"themes": [], "documents_analyzed": 0, "documents_with_themes": 0, "llm_extracted": False}
+
+    if CORPUS_THEMES_PATH.exists():
+        try:
+            cached = json.loads(CORPUS_THEMES_PATH.read_text(encoding="utf-8"))
+            cached["llm_extracted"] = True
+            cached["documents_analyzed"] = len(rows)
+            return cached
+        except Exception:
+            pass
+
+    result = _sql_aggregate_themes(rows)
+    result["llm_extracted"] = False
+    return result
+
+
+@app.post("/corpus/themes/extract")
+async def extract_corpus_themes(
+    model: str = Form(default=DEFAULT_MODEL),
+    regenerate: bool = Query(default=False),
+):
+    if CORPUS_THEMES_PATH.exists() and not regenerate:
+        try:
+            cached = json.loads(CORPUS_THEMES_PATH.read_text(encoding="utf-8"))
+
+            async def _cached():
+                yield json.dumps({"stage": "cached", **cached}) + "\n"
+
+            return StreamingResponse(_cached(), media_type="application/x-ndjson")
+        except Exception:
+            pass
+
+    async def generate():
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute("SELECT filename, themes_json FROM document_themes")
+            rows = await cur.fetchall()
+
+        docs = []
+        for row in rows:
+            try:
+                themes = json.loads(row["themes_json"])
+                if themes:
+                    docs.append({"filename": row["filename"], "themes": themes})
+            except Exception:
+                continue
+
+        if not docs:
+            yield json.dumps({"error": "No per-document themes extracted yet. Run Themes on individual documents first."}) + "\n"
+            return
+
+        def _fmt_doc(doc: dict) -> str:
+            lines = [f"Document: {doc['filename']}"]
+            for t in doc["themes"]:
+                line = f"  - {t.get('name', '?')} ({t.get('mentions', 1)} mentions)"
+                if t.get("quote"):
+                    line += f': "{t["quote"]}"'
+                lines.append(line)
+            return "\n".join(lines)
+
+        batches = [docs[i:i + _CORPUS_DOC_BATCH] for i in range(0, len(docs), _CORPUS_DOC_BATCH)]
+        n = len(batches)
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _run_map(client: httpx.AsyncClient, idx: int, batch: list[dict]) -> None:
+            doc_themes_text = "\n\n".join(_fmt_doc(d) for d in batch)
+            prompt = _CORPUS_MAP_PROMPT.format(doc_themes=doc_themes_text)
+            try:
+                resp = await client.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE},
+                )
+                resp.raise_for_status()
+                out = resp.json().get("response", "").strip()
+            except Exception as e:
+                logger.warning("Corpus map batch %d/%d failed: %r", idx + 1, n, e)
+                out = ""
+            await queue.put((idx, out))
+
+        map_results = [""] * n
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            tasks = [asyncio.create_task(_run_map(client, i, batch)) for i, batch in enumerate(batches)]
+            for done in range(1, n + 1):
+                idx, out = await queue.get()
+                map_results[idx] = out
+                yield json.dumps({"stage": "map", "batch": done, "total": n}) + "\n"
+            await asyncio.gather(*tasks)
+
+        notes = "\n\n".join(
+            f"[Batch {i + 1}/{n}]\n{out}" for i, out in enumerate(map_results) if out
+        ) or "No cross-document patterns found."
+
+        yield json.dumps({"stage": "reduce"}) + "\n"
+
+        try:
+            async with httpx.AsyncClient(timeout=240.0) as client:
+                resp = await client.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": _CORPUS_REDUCE_PROMPT.format(notes=notes), "stream": False, "keep_alive": KEEP_ALIVE},
+                )
+                resp.raise_for_status()
+                raw = resp.json().get("response", "").strip()
+        except Exception as e:
+            logger.error("Corpus reduce failed: %r", e)
+            yield json.dumps({"error": repr(e)}) + "\n"
+            return
+
+        themes = _parse_themes_json(raw)
+        if not themes:
+            yield json.dumps({"error": "Model returned no valid JSON. Try again or check the model output."}) + "\n"
+            return
+
+        result = {
+            "themes": themes,
+            "documents_with_themes": len(docs),
+        }
+        CORPUS_THEMES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CORPUS_THEMES_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        yield json.dumps({"stage": "done", **result}) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+
 # ── Chat ──────────────────────────────────────────────────────
 
 @app.post("/chat")
@@ -609,8 +983,40 @@ async def chat(
         )
         await db.commit()
 
+    corpus_context = None
+    if _CORPUS_KEYWORDS.search(message):
+        try:
+            corpus_data = await corpus_themes()
+            if corpus_data["documents_with_themes"] > 0:
+                theme_lines = []
+                for t in corpus_data["themes"][:20]:
+                    ex = ", ".join(Path(f).stem for f in t["examples"][:3])
+                    theme_lines.append(
+                        f"- **{t['name']}** — {t['doc_count']} doc(s), {t['total_mentions']} mention(s) "
+                        f"(e.g. {ex}): \"{t['quote']}\""
+                    )
+                corpus_context = (
+                    f"Corpus theme analysis ({corpus_data['documents_analyzed']} documents, "
+                    f"{corpus_data['documents_with_themes']} with extracted themes):\n\n"
+                    + "\n".join(theme_lines)
+                )
+        except Exception:
+            pass
+
     chunks = await rag.retrieve(message, OLLAMA_BASE)
-    if chunks:
+    if corpus_context:
+        excerpt_lines = [
+            f"[Source: {c['source']}, excerpt {c['chunk_index']}]\n{c['text']}"
+            for c in chunks
+        ] if chunks else []
+        rag_block = ("\n\n---\n\nSupporting excerpts:\n\n" + "\n\n---\n\n".join(excerpt_lines)) if excerpt_lines else ""
+        system_prompt = (
+            "You are analyzing an ethnographic interview corpus. "
+            "The following corpus-level theme analysis has been pre-computed across all documents. "
+            "Use it to answer questions about patterns and frequency across the corpus.\n\n"
+            + corpus_context + rag_block
+        )
+    elif chunks:
         excerpt_lines = [
             f"[Source: {c['source']}, excerpt {c['chunk_index']}]\n{c['text']}"
             for c in chunks

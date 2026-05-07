@@ -15,7 +15,9 @@
       "Bash(Select-Object -First 40)",
       "Bash(Get-ChildItem \"C:\\\\Users\\\\jawan\\\\Desktop\\\\code\\\\interview-analyzer\\\\data\\\\chroma\" -Recurse -Depth 2)",
       "Bash(Select-Object FullName, PSIsContainer)",
-      "Bash(Format-Table)"
+      "Bash(Format-Table)",
+      "mcp__ide__executeCode",
+      "mcp__ide__getDiagnostics"
     ]
   }
 }

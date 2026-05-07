@@ -72,6 +72,14 @@ The app starts at `http://localhost:8000`. The SQLite database (`data/interview-
 - Uses the same map-reduce pipeline as summaries: the map step identifies relevant mentions per chunk, and the reduce step consolidates them into a JSON object. Unmentioned fields are `null`.
 - Results are cached in `data/extractions/`. Add `?regenerate=true` to rerun.
 
+**Corpus-level theme analysis**
+- Each ingested PDF has a "Themes" action (`POST /documents/{filename}/themes`) that extracts recurring thematic concepts using the same map-reduce pipeline.
+- The map step identifies themes per passage as short labels with supporting quotes; the reduce step consolidates them into a ranked JSON list with mention counts.
+- Results are cached in `data/themes/` and stored in a `document_themes` SQLite table for fast cross-document aggregation.
+- `GET /corpus/themes` aggregates themes across all analyzed documents, returning each theme ranked by how many documents mention it (`doc_count`) and total mention count.
+- The sidebar shows a **Corpus Analysis** collapsible panel (visible once at least one document has themes extracted) with a frequency bar chart of top themes.
+- The `/chat` endpoint automatically detects corpus-level questions (keywords like "across all documents", "recurring", "pattern", "frequency") and injects the aggregated corpus theme summary into the system prompt instead of (or alongside) RAG chunks.
+
 **Streaming responses with chain-of-thought**
 - Ollama responses stream as NDJSON. The browser's `ThinkParser` splits `<think>...</think>` tokens from response tokens in real time.
 - Chain-of-thought is shown as a collapsible "Reasoning" panel above the final answer.

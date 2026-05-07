@@ -3,9 +3,9 @@
 ## Working (implement or improve)
 
 - [ ] **Deductive coding against a codebook** — feed existing theoretical codes from early interviews and apply them consistently across all 30 transcripts. LLMs are more consistent than human coders here, though not always more accurate.
-- [ ] **Structured data extraction** — extract specific fields (acreage, grant status, generational status, farm type) from unstructured transcript text into clean structured output. Highest-confidence use case in the literature.
+- [x] **Structured data extraction** — extract specific fields (acreage, grant status, generational status, farm type) from unstructured transcript text into clean structured output. Highest-confidence use case in the literature.
 - [x] **Per-document thematic summary** — generate a structured summary per interview capturing key topics, stances, and notable quotes. Useful for mapping the corpus before deep analysis.
-- [ ] **Corpus-level pattern detection** — identify recurring themes across documents and approximate frequency. Good for a first pass; less reliable than human analysis for nuance. Need to implement a more intelligent RAG system.
+- [x] **Corpus-level pattern detection** — identify recurring themes across documents and approximate frequency. Good for a first pass; less reliable than human analysis for nuance. Per-document theme extraction (map-reduce) cached in `data/themes/` + SQLite; corpus aggregation via `GET /corpus/themes`; chat auto-routes corpus queries to theme context.
 
 ## Not Yet Tried — Achievable with Current Setup
 

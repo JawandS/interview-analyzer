@@ -669,6 +669,13 @@ function renderDocList(docs) {
       extBtn.title = 'Extract structured field data';
       extBtn.addEventListener('click', () => extractDocument(doc.name, extBtn));
       item.appendChild(extBtn);
+
+      const themBtn = document.createElement('button');
+      themBtn.className = 'doc-themes-btn';
+      themBtn.textContent = 'Themes';
+      themBtn.title = 'Extract themes from this document';
+      themBtn.addEventListener('click', () => themeDocument(doc.name, themBtn));
+      item.appendChild(themBtn);
     } else {
       const btn = document.createElement('button');
       btn.className = 'doc-ingest-btn';
@@ -840,6 +847,239 @@ function showExtractionCard(data) {
   modalBody.appendChild(table);
 }
 
+async function themeDocument(filename, btn) {
+  btn.disabled = true;
+  btn.textContent = '···';
+
+  const title = filename.replace(/\.pdf$/i, '');
+  openModal('Themes — ' + title, null);
+
+  try {
+    const fd = new FormData();
+    if (activeModel) fd.append('model', activeModel);
+
+    const resp = await fetch(`/documents/${encodeURIComponent(filename)}/themes`, {
+      method: 'POST',
+      body: fd,
+    });
+    if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.error) {
+            showModalContent(`**Error:** ${msg.error}`);
+          } else if (msg.stage === 'cached' || msg.stage === 'done') {
+            showThemesList(msg.themes);
+            loadCorpusPanel();
+          } else if (msg.stage === 'map_cached') {
+            updateSummaryProgress('Using cached passages…', 1);
+          } else if (msg.stage === 'map') {
+            updateSummaryProgress(`Scanning passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total);
+          } else if (msg.stage === 'reduce') {
+            updateSummaryProgress('Consolidating themes…', 1);
+          }
+        } catch { }
+      }
+    }
+  } catch (err) {
+    showModalContent(`**Error extracting themes:** ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Themes';
+  }
+}
+
+function showThemesList(themes) {
+  if (!themes || !themes.length) {
+    modalBody.innerHTML = '<p style="color:var(--text-muted);padding:1rem">No themes identified.</p>';
+    return;
+  }
+
+  const table = document.createElement('table');
+  table.className = 'extraction-table';
+
+  const hdr = table.createTHead().insertRow();
+  ['Theme', 'Mentions', 'Quote'].forEach(h => {
+    const th = document.createElement('th');
+    th.textContent = h;
+    hdr.appendChild(th);
+  });
+
+  themes.forEach(t => {
+    const row = table.insertRow();
+    const tdName = row.insertCell();
+    tdName.textContent = t.name || '—';
+    const tdMentions = row.insertCell();
+    tdMentions.textContent = t.mentions ?? '—';
+    tdMentions.style.textAlign = 'center';
+    const tdQuote = row.insertCell();
+    tdQuote.textContent = t.quote ? `"${t.quote}"` : '—';
+    tdQuote.style.fontStyle = 'italic';
+  });
+
+  modalBody.innerHTML = '';
+  modalBody.appendChild(table);
+}
+
+// ── Corpus Analysis panel ─────────────────────────────────────
+function _renderCorpusThemes(data, body) {
+  const maxDocs = data.documents_analyzed || data.documents_with_themes || 1;
+
+  const meta = document.createElement('p');
+  meta.className = 'corpus-meta';
+  const tag = data.llm_extracted ? ' · LLM synthesized' : ' · label-matched';
+  meta.textContent = `${data.documents_with_themes} of ${data.documents_analyzed ?? data.documents_with_themes} docs analyzed${tag}`;
+
+  const list = document.createElement('div');
+  list.className = 'corpus-theme-list';
+
+  (data.themes || []).forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'corpus-theme-row';
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'corpus-theme-name';
+    nameEl.textContent = t.name;
+
+    const badge = document.createElement('span');
+    badge.className = 'corpus-theme-badge';
+    badge.textContent = `${t.doc_count} doc${t.doc_count !== 1 ? 's' : ''}`;
+
+    const bar = document.createElement('div');
+    bar.className = 'corpus-theme-bar';
+    const fill = document.createElement('div');
+    fill.className = 'corpus-theme-bar-fill';
+    fill.style.width = `${Math.round((t.doc_count / maxDocs) * 100)}%`;
+    bar.appendChild(fill);
+
+    row.appendChild(nameEl);
+    row.appendChild(badge);
+    row.appendChild(bar);
+
+    if (t.quote) {
+      const quote = document.createElement('div');
+      quote.className = 'corpus-theme-quote';
+      quote.textContent = `"${t.quote}"`;
+      row.appendChild(quote);
+    }
+
+    list.appendChild(row);
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'corpus-actions';
+
+  const extractBtn = document.createElement('button');
+  extractBtn.className = 'corpus-extract-btn';
+  extractBtn.textContent = data.llm_extracted ? 'Re-extract' : 'Extract corpus themes';
+  extractBtn.title = 'Run LLM cross-document map-reduce to find recurring patterns';
+  extractBtn.addEventListener('click', () => runCorpusExtraction(extractBtn));
+  actions.appendChild(extractBtn);
+
+  const refreshBtn = document.createElement('button');
+  refreshBtn.className = 'corpus-refresh-btn';
+  refreshBtn.textContent = 'Refresh';
+  refreshBtn.addEventListener('click', loadCorpusPanel);
+  actions.appendChild(refreshBtn);
+
+  body.innerHTML = '';
+  body.appendChild(meta);
+  if (data.themes && data.themes.length) body.appendChild(list);
+  body.appendChild(actions);
+}
+
+async function loadCorpusPanel() {
+  try {
+    const resp = await fetch('/corpus/themes');
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    const section = document.getElementById('corpusSection');
+    const body    = document.getElementById('corpusBody');
+
+    if (data.documents_with_themes === 0) {
+      section.style.display = 'none';
+      return;
+    }
+
+    section.style.display = '';
+    _renderCorpusThemes(data, body);
+  } catch { }
+}
+
+async function runCorpusExtraction(btn) {
+  btn.disabled = true;
+  btn.textContent = '···';
+
+  const body = document.getElementById('corpusBody');
+
+  const progressEl = document.createElement('p');
+  progressEl.className = 'corpus-meta';
+  progressEl.textContent = 'Starting…';
+  body.appendChild(progressEl);
+
+  try {
+    const fd = new FormData();
+    if (activeModel) fd.append('model', activeModel);
+
+    const resp = await fetch('/corpus/themes/extract', { method: 'POST', body: fd });
+    if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.error) {
+            progressEl.textContent = `Error: ${msg.error}`;
+          } else if (msg.stage === 'cached' || msg.stage === 'done') {
+            _renderCorpusThemes({ ...msg, llm_extracted: true }, body);
+            return;
+          } else if (msg.stage === 'map') {
+            progressEl.textContent = `Cross-document pass: document batch ${msg.batch} of ${msg.total}…`;
+          } else if (msg.stage === 'reduce') {
+            progressEl.textContent = 'Synthesizing corpus themes…';
+          }
+        } catch { }
+      }
+    }
+  } catch (err) {
+    const body2 = document.getElementById('corpusBody');
+    const p = document.createElement('p');
+    p.className = 'corpus-meta';
+    p.textContent = `Error: ${err.message}`;
+    body2.appendChild(p);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Re-extract';
+  }
+}
+
+document.getElementById('corpusDetails')?.addEventListener('toggle', function() {
+  if (this.open) loadCorpusPanel();
+});
+
 // ── Document upload ──────────────────────────────────────────
 const docUploadBtn   = document.getElementById('docUploadBtn');
 const docFileInput   = document.getElementById('docFileInput');
@@ -923,3 +1163,4 @@ document.addEventListener('keydown', e => {
 fetch('/models/active').then(r => r.json()).then(d => { activeModel = d.model ?? null; });
 loadSessions();
 loadDocuments();
+loadCorpusPanel();
