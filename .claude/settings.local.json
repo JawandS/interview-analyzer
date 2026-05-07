@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wsl *)",
+      "PowerShell(curl.exe -s http://localhost:11434/api/tags)"
+    ]
+  }
+}

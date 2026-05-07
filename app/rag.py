@@ -28,11 +28,11 @@ def _chunk(text: str) -> list[str]:
 async def _embed(text: str, ollama_base: str) -> list[float]:
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
-            f"{ollama_base}/api/embeddings",
-            json={"model": EMBED_MODEL, "prompt": text},
+            f"{ollama_base}/api/embed",
+            json={"model": EMBED_MODEL, "input": text},
         )
         resp.raise_for_status()
-        return resp.json()["embedding"]
+        return resp.json()["embeddings"][0]
 
 
 async def ingest(ollama_base: str) -> None:

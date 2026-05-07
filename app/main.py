@@ -16,7 +16,9 @@ import subprocess
 from app import rag
 
 
-def _wsl_gateway() -> str:
+def _ollama_host() -> str:
+    if os.name == "nt":
+        return "localhost"
     try:
         out = subprocess.check_output(["ip", "route", "show", "default"], text=True)
         return out.split()[2]
@@ -24,8 +26,8 @@ def _wsl_gateway() -> str:
         return "localhost"
 
 
-OLLAMA_BASE   = f"http://{_wsl_gateway()}:11434"
-DEFAULT_MODEL = "gemma4:latest"
+OLLAMA_BASE   = f"http://{_ollama_host()}:11434"
+DEFAULT_MODEL = "gemma4:e4b"
 KEEP_ALIVE    = "30m"
 DB_PATH       = Path(__file__).parent.parent / "data" / "interview-analyzer.db"
 
