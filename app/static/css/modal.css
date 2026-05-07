@@ -141,6 +141,14 @@
   transition: width 0.4s ease;
 }
 
+.summary-stream {
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
 /* ── Confirm dialogs ─────────────────────────────────────────── */
 .confirm-panel {
   width: min(420px, 92vw);

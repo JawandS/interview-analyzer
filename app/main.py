@@ -347,44 +347,68 @@ async def create_summary(
 
         batches = [chunks[i:i + _MAP_BATCH_SIZE] for i in range(0, len(chunks), _MAP_BATCH_SIZE)]
         n = len(batches)
-        map_outputs: list[str] = []
 
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _run_map(client: httpx.AsyncClient, idx: int, batch: list[str]) -> None:
+            prompt = _MAP_PROMPT.format(i=idx + 1, n=n, filename=filename, text="\n".join(batch))
+            try:
+                resp = await client.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE},
+                )
+                resp.raise_for_status()
+                out = resp.json().get("response", "").strip()
+            except Exception as e:
+                logger.warning("Summary map step %d/%d failed for %s: %r", idx + 1, n, filename, e)
+                out = "nothing notable."
+            await queue.put((idx, out))
+
+        map_results: list[str] = ["nothing notable."] * n
         async with httpx.AsyncClient(timeout=180.0) as client:
-            for i, batch in enumerate(batches):
-                prompt = _MAP_PROMPT.format(i=i + 1, n=n, filename=filename, text="\n".join(batch))
-                try:
-                    resp = await client.post(
-                        f"{OLLAMA_BASE}/api/generate",
-                        json={"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE},
-                    )
-                    resp.raise_for_status()
-                    out = resp.json().get("response", "").strip()
-                except Exception as e:
-                    logger.warning("Summary map step %d/%d failed for %s: %s", i + 1, n, filename, e)
-                    out = "nothing notable."
-                if out and out.lower() != "nothing notable.":
-                    map_outputs.append(f"[Batch {i + 1}/{n}]\n{out}")
-                yield json.dumps({"stage": "map", "batch": i + 1, "total": n}) + "\n"
+            tasks = [asyncio.create_task(_run_map(client, i, batch)) for i, batch in enumerate(batches)]
+            for done in range(1, n + 1):
+                idx, out = await queue.get()
+                map_results[idx] = out
+                yield json.dumps({"stage": "map", "batch": done, "total": n}) + "\n"
+            await asyncio.gather(*tasks)
+
+        map_outputs: list[str] = [
+            f"[Batch {i + 1}/{n}]\n{out}"
+            for i, out in enumerate(map_results)
+            if out and out.lower() != "nothing notable."
+        ]
 
         notes = "\n\n".join(map_outputs) if map_outputs else "No notable content extracted."
         yield json.dumps({"stage": "reduce"}) + "\n"
 
+        accumulated = ""
         try:
             async with httpx.AsyncClient(timeout=300.0) as client:
-                resp = await client.post(
+                async with client.stream(
+                    "POST",
                     f"{OLLAMA_BASE}/api/generate",
-                    json={"model": model, "prompt": _REDUCE_PROMPT.format(notes=notes), "stream": False, "keep_alive": KEEP_ALIVE},
-                )
-                resp.raise_for_status()
-                summary_text = resp.json().get("response", "")
+                    json={"model": model, "prompt": _REDUCE_PROMPT.format(notes=notes), "stream": True, "keep_alive": KEEP_ALIVE},
+                ) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        try:
+                            token = json.loads(line).get("response", "")
+                            if token:
+                                accumulated += token
+                                yield json.dumps({"stage": "streaming", "token": token}) + "\n"
+                        except json.JSONDecodeError:
+                            continue
         except Exception as e:
-            logger.error("Summary reduce step failed for %s: %s", filename, e)
-            yield json.dumps({"error": str(e)}) + "\n"
+            logger.error("Summary reduce step failed for %s: %r", filename, e)
+            yield json.dumps({"error": repr(e)}) + "\n"
             return
 
         SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
-        summary_path.write_text(summary_text, encoding="utf-8")
-        yield json.dumps({"stage": "done", "summary": summary_text}) + "\n"
+        summary_path.write_text(accumulated, encoding="utf-8")
+        yield json.dumps({"stage": "done", "summary": accumulated}) + "\n"
 
     return StreamingResponse(generate(), media_type="application/x-ndjson")
 

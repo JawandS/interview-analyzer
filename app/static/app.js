@@ -725,7 +725,9 @@ async function summarizeDocument(filename, btn) {
           } else if (msg.stage === 'map') {
             updateSummaryProgress(`Reading passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total);
           } else if (msg.stage === 'reduce') {
-            updateSummaryProgress('Synthesizing…', 1);
+            switchToStreamingView();
+          } else if (msg.stage === 'streaming') {
+            appendStreamingToken(msg.token);
           }
         } catch { /* partial line — wait for next chunk */ }
       }
@@ -794,6 +796,15 @@ function updateSummaryProgress(label, fraction) {
 
 function showModalContent(content) {
   modalBody.innerHTML = renderContent(content);
+}
+
+function switchToStreamingView() {
+  modalBody.innerHTML = '<div class="summary-stream"></div>';
+}
+
+function appendStreamingToken(token) {
+  const el = modalBody.querySelector('.summary-stream');
+  if (el) el.textContent += token;
 }
 
 function closeModal() {
