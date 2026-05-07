@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -270,8 +270,52 @@ async def get_summary(filename: str):
     raise HTTPException(status_code=404, detail="No summary cached")
 
 
+_MAP_BATCH_SIZE = 20
+
+_MAP_PROMPT = """\
+You are analyzing an excerpt from an ethnographic interview transcript.
+Extract from this passage only:
+- Key factual data (names, places, dates, roles, institutions, quantities)
+- Direct quotes worth preserving (copy verbatim, keep short)
+- The interviewee's stated positions or attitudes
+- Any tension between what they say they believe and what they describe doing
+
+Be terse. Bullet points only. If nothing notable is in this passage, return "nothing notable."
+
+Passage {i}/{n} from {filename}:
+{text}"""
+
+_REDUCE_PROMPT = """\
+You are synthesizing notes from an ethnographic interview transcript.
+Below are extracted notes from every section. Produce a structured summary \
+using the headings below. Be specific — use the interviewee's own words where possible.
+
+## Interviewee Profile
+(background, role, location, context — only what is stated)
+
+## Key Stances and Attitudes
+(their positions on the main topics discussed)
+
+## Internal Tensions
+(places where stated beliefs conflict with described practices, or where they hedge)
+
+## Notable Quotes
+(3–6 direct quotes that best capture their voice)
+
+## Recurring Themes
+(2–4 themes that run through the whole interview)
+
+---
+Extracted notes:
+{notes}"""
+
+
 @app.post("/documents/{filename}/summary")
-async def create_summary(filename: str, model: str = Form(default=DEFAULT_MODEL)):
+async def create_summary(
+    filename: str,
+    model: str = Form(default=DEFAULT_MODEL),
+    regenerate: bool = Query(default=False),
+):
     pdf_path = rag.DATA_DIR / filename
     if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
         raise HTTPException(status_code=404, detail="Document not found")
@@ -279,33 +323,51 @@ async def create_summary(filename: str, model: str = Form(default=DEFAULT_MODEL)
     stem = Path(filename).stem
     summary_path = SUMMARIES_DIR / f"{stem}.md"
 
-    if summary_path.exists():
+    if summary_path.exists() and not regenerate:
         return {"summary": summary_path.read_text(encoding="utf-8"), "cached": True}
 
-    def _read_pdf():
-        doc = fitz.open(str(pdf_path))
-        return "".join(page.get_text() for page in doc)
+    # Use ingested chunks; fall back to reading the PDF directly
+    chunks = await rag.get_chunks_for_document(filename)
+    if not chunks:
+        def _read_pdf():
+            doc = fitz.open(str(pdf_path))
+            return "".join(page.get_text() for page in doc)
+        text = await asyncio.to_thread(_read_pdf)
+        chunks = [c.strip() for c in rag._chunk(text) if c.strip()]
 
-    text = await asyncio.to_thread(_read_pdf)
-    excerpt = text[:8000]
+    batches = [chunks[i:i + _MAP_BATCH_SIZE] for i in range(0, len(chunks), _MAP_BATCH_SIZE)]
+    n = len(batches)
+    map_outputs: list[str] = []
 
-    prompt = (
-        "Provide a structured summary of the following interview document. "
-        "Include: main topics, key themes, notable quotes, any methodology, "
-        "and overall findings. Use markdown headings and bullet points.\n\n"
-        f"Document: {filename}\n\n{excerpt}"
-    )
+    async with httpx.AsyncClient(timeout=180.0) as client:
+        for i, batch in enumerate(batches):
+            prompt = _MAP_PROMPT.format(i=i + 1, n=n, filename=filename, text="\n".join(batch))
+            try:
+                resp = await client.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE},
+                )
+                resp.raise_for_status()
+                out = resp.json().get("response", "").strip()
+            except Exception as e:
+                logger.warning("Summary map step %d/%d failed for %s: %s", i + 1, n, filename, e)
+                out = "nothing notable."
+            if out and out.lower() != "nothing notable.":
+                map_outputs.append(f"[Batch {i + 1}/{n}]\n{out}")
+
+    notes = "\n\n".join(map_outputs) if map_outputs else "No notable content extracted."
+    reduce_prompt = _REDUCE_PROMPT.format(notes=notes)
 
     try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             resp = await client.post(
                 f"{OLLAMA_BASE}/api/generate",
-                json={"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE},
+                json={"model": model, "prompt": reduce_prompt, "stream": False, "keep_alive": KEEP_ALIVE},
             )
             resp.raise_for_status()
             summary_text = resp.json().get("response", "")
     except Exception as e:
-        logger.error("Summary generation failed for %s: %s", filename, e)
+        logger.error("Summary reduce step failed for %s: %s", filename, e)
         raise HTTPException(status_code=500, detail=str(e))
 
     SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)

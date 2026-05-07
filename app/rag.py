@@ -99,6 +99,30 @@ async def ingest_file(filename: str, ollama_base: str) -> dict:
     return {"ok": True, "chunks": len(ids)}
 
 
+async def get_chunks_for_document(filename: str) -> list[str]:
+    def _fetch():
+        CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+        client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+        col = client.get_or_create_collection(COLLECTION)
+        if col.count() == 0:
+            return []
+        results = col.get(include=["documents"])
+        prefix = f"{filename}::"
+        pairs = [
+            (id_, doc)
+            for id_, doc in zip(results["ids"], results["documents"])
+            if id_.startswith(prefix)
+        ]
+        pairs.sort(key=lambda p: int(p[0].split("::")[-1]))
+        return [doc for _, doc in pairs]
+
+    try:
+        return await asyncio.to_thread(_fetch)
+    except Exception as e:
+        logger.warning("RAG: get_chunks_for_document failed for %s: %s", filename, e)
+        return []
+
+
 async def retrieve(query: str, ollama_base: str, n: int = 5) -> list[str]:
     try:
         query_vec = await _embed(query, ollama_base)
