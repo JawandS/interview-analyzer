@@ -7,3 +7,33 @@
     <div class="modal-body bubble" id="modalBody"></div>
   </div>
 </div>
+
+<div class="modal-overlay" id="streamInterruptModal" role="dialog" aria-modal="true">
+  <div class="confirm-panel">
+    <div class="modal-header">
+      <span class="modal-title">Response in progress</span>
+    </div>
+    <div class="confirm-body">
+      <p>Switching models will interrupt the current response. Continue?</p>
+    </div>
+    <div class="confirm-actions">
+      <button class="confirm-btn confirm-btn-ghost" id="streamInterruptCancel">Cancel</button>
+      <button class="confirm-btn confirm-btn-primary" id="streamInterruptConfirm">Switch anyway</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="sessionModelModal" role="dialog" aria-modal="true">
+  <div class="confirm-panel">
+    <div class="modal-header">
+      <span class="modal-title">Different model</span>
+    </div>
+    <div class="confirm-body">
+      <p id="sessionModelBody"></p>
+    </div>
+    <div class="confirm-actions">
+      <button class="confirm-btn confirm-btn-primary" id="sessionModelKeepBtn"></button>
+      <button class="confirm-btn confirm-btn-ghost" id="sessionModelSwitchBtn"></button>
+    </div>
+  </div>
+</div>

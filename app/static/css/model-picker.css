@@ -129,3 +129,15 @@
   letter-spacing: 0.06em;
   color: #c0504a;
 }
+
+.model-switch-warning {
+  font-family: "Consolas", "Menlo", "Courier New", monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  background: var(--accent-dim);
+  border-radius: 5px;
+  padding: 0.45rem 0.65rem;
+  margin-bottom: 0.3rem;
+  line-height: 1.55;
+}

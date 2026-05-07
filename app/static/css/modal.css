@@ -111,3 +111,70 @@
   letter-spacing: 0.1em;
   animation: pulse 1.2s steps(1) infinite;
 }
+
+/* ── Confirm dialogs ─────────────────────────────────────────── */
+.confirm-panel {
+  width: min(420px, 92vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-solid);
+  border: 1px solid var(--border-hard);
+  border-radius: 8px;
+  box-shadow: 0 20px 60px var(--shadow), 0 0 0 1px var(--border);
+  overflow: hidden;
+}
+
+.modal-overlay.open .confirm-panel {
+  animation: modalIn 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.confirm-body {
+  padding: 1rem 1.1rem 0.85rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.confirm-body p { margin: 0; }
+
+.confirm-body strong { color: var(--text); font-weight: 600; }
+
+.confirm-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  padding: 0 1.1rem 1rem;
+}
+
+.confirm-btn {
+  padding: 0.38rem 0.9rem;
+  font-family: "Consolas", "Menlo", "Courier New", monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+}
+
+.confirm-btn-primary {
+  background: var(--accent);
+  color: #faf7f2;
+  border: 1px solid var(--accent);
+}
+
+.confirm-btn-primary:hover {
+  box-shadow: 0 0 10px var(--glow);
+}
+
+.confirm-btn-ghost {
+  background: none;
+  color: var(--muted);
+  border: 1px solid var(--border-hard);
+}
+
+.confirm-btn-ghost:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--accent-dim);
+}

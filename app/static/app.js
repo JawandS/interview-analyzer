@@ -7,8 +7,6 @@ const katex  = window.katex;
 marked.use({ breaks: true });
 
 function renderContent(text) {
-  // Extract math blocks before marked sees them so it can't mangle
-  // underscore/asterisk characters inside LaTeX expressions.
   const blocks = [];
   const save = (math, display) => {
     const id = blocks.length;
@@ -27,7 +25,6 @@ function renderContent(text) {
       throwOnError: false,
       displayMode: display,
     });
-    // split/join avoids regex issues with special chars in rendered HTML
     html = html.split(`MATHPLACEHOLDER_${id}_END`).join(rendered);
   });
 
@@ -66,13 +63,43 @@ sidebarBtn.addEventListener('click', () => {
   localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed') ? '1' : '0');
 });
 
+// ── Model state ──────────────────────────────────────────────
+let activeModel           = null;
+let pendingSwitchModel    = null;
+let sessionPreferredModel = null;
+
+async function doModelSwitch(newModel) {
+  const oldModel = activeModel;
+  activeModel    = newModel;
+
+  const sel = document.getElementById('model-select');
+  if (sel) sel.value = newModel;
+
+  const picker = document.getElementById('model-picker');
+  if (picker) {
+    picker.querySelector('.model-pill-text').textContent = newModel;
+    picker.querySelectorAll('.model-option').forEach(b => {
+      if (b.textContent === newModel) b.dataset.selected = '';
+      else delete b.dataset.selected;
+    });
+  }
+
+  const fd = new FormData();
+  fd.append('new_model', newModel);
+  if (oldModel) fd.append('old_model', oldModel);
+  await fetch('/models/switch', { method: 'POST', body: fd });
+}
+
 // ── Custom model picker (replaces native <select>) ───────────
 function upgradeModelSelect() {
   const sel = document.getElementById('model-select');
   if (!sel || document.getElementById('model-picker')) return;
 
   const options = Array.from(sel.options);
-  let current   = sel.value || options[0]?.value || '';
+  const initial = (activeModel && options.find(o => o.value === activeModel))
+    ? activeModel
+    : sel.value || options[0]?.value || '';
+  sel.value = initial;
 
   const picker = document.createElement('details');
   picker.id        = 'model-picker';
@@ -83,7 +110,7 @@ function upgradeModelSelect() {
 
   const pillText = document.createElement('span');
   pillText.className   = 'model-pill-text';
-  pillText.textContent = current;
+  pillText.textContent = initial;
 
   const chevronSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   chevronSvg.setAttribute('viewBox', '0 0 24 24');
@@ -98,19 +125,30 @@ function upgradeModelSelect() {
   const panel = document.createElement('div');
   panel.className = 'model-dropdown';
 
+  const warning = document.createElement('div');
+  warning.className   = 'model-switch-warning';
+  warning.textContent = '⚠ Switching models unloads the current model — this takes time.';
+  panel.appendChild(warning);
+
   options.forEach(opt => {
     const btn = document.createElement('button');
     btn.type        = 'button';
     btn.className   = 'model-option';
     btn.textContent = opt.value;
-    if (opt.value === current) btn.dataset.selected = '';
+    if (opt.value === initial) btn.dataset.selected = '';
 
     btn.addEventListener('click', () => {
-      current              = opt.value;
-      sel.value            = opt.value;
-      pillText.textContent = opt.value;
-      panel.querySelectorAll('.model-option').forEach(b => delete b.dataset.selected);
-      btn.dataset.selected = '';
+      if (opt.value === activeModel) {
+        picker.open = false;
+        return;
+      }
+      if (document.body.dataset.streaming) {
+        pendingSwitchModel = opt.value;
+        picker.open = false;
+        document.getElementById('streamInterruptModal').classList.add('open');
+        return;
+      }
+      doModelSwitch(opt.value);
       picker.open = false;
     });
     panel.appendChild(btn);
@@ -323,7 +361,8 @@ function startRename(item, titleEl, sessionId) {
 async function loadSession(id) {
   const resp = await fetch(`/sessions/${id}`);
   const data = await resp.json();
-  currentSessionId = id;
+  currentSessionId      = id;
+  sessionPreferredModel = data.session.model ?? null;
 
   msgs.innerHTML = '';
   data.messages.forEach(m => {
@@ -352,8 +391,9 @@ async function loadSession(id) {
 }
 
 function startNewChat() {
-  currentSessionId = null;
-  msgs.innerHTML   = GREETING;
+  currentSessionId      = null;
+  sessionPreferredModel = null;
+  msgs.innerHTML        = GREETING;
   document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
   document.getElementById('msg-input').focus();
 }
@@ -374,9 +414,32 @@ async function setSessionTitle(sessionId, firstMessage) {
   await fetch(`/sessions/${sessionId}/title`, { method: 'PATCH', body: fd });
 }
 
+// ── Session model mismatch prompt ────────────────────────────
+function promptSessionModelChoice() {
+  return new Promise(resolve => {
+    document.getElementById('sessionModelBody').innerHTML =
+      `This conversation was started with <strong>${sessionPreferredModel}</strong>. ` +
+      `The active model is <strong>${activeModel}</strong>.`;
+    document.getElementById('sessionModelKeepBtn').textContent   = `Keep ${activeModel}`;
+    document.getElementById('sessionModelSwitchBtn').textContent = `Switch to ${sessionPreferredModel}`;
+    document.getElementById('sessionModelModal').classList.add('open');
+
+    function cleanup(val) {
+      document.getElementById('sessionModelModal').classList.remove('open');
+      document.getElementById('sessionModelKeepBtn').onclick   = null;
+      document.getElementById('sessionModelSwitchBtn').onclick = null;
+      resolve(val);
+    }
+
+    document.getElementById('sessionModelKeepBtn').onclick   = () => cleanup(false);
+    document.getElementById('sessionModelSwitchBtn').onclick = () => cleanup(true);
+  });
+}
+
 // ── Streaming chat handler ───────────────────────────────────
 const form = document.getElementById('chat-form');
-let modelReady = false;
+let modelReady   = false;
+let activeReader = null;
 
 form.addEventListener('submit', async e => {
   e.preventDefault();
@@ -386,16 +449,19 @@ form.addEventListener('submit', async e => {
   const text     = textarea.value.trim();
   if (!text) return;
 
+  if (currentSessionId && sessionPreferredModel && sessionPreferredModel !== activeModel) {
+    const doSwitch = await promptSessionModelChoice();
+    if (doSwitch) await doModelSwitch(sessionPreferredModel);
+    sessionPreferredModel = null;
+  }
+
   textarea.value = '';
   resize(textarea);
   document.body.dataset.streaming = '1';
 
-  // Create session on first message
   const isNew = !currentSessionId;
   if (isNew) {
-    const sel   = document.getElementById('model-select');
-    const model = sel?.value || '';
-    const s     = await createSession(model);
+    const s = await createSession(activeModel || '');
     currentSessionId = s.id;
     setSessionTitle(currentSessionId, text);
     loadSessions();
@@ -442,11 +508,10 @@ form.addEventListener('submit', async e => {
   );
 
   try {
-    const fd  = new FormData();
+    const fd = new FormData();
     fd.append('message', text);
     fd.append('session_id', currentSessionId);
-    const sel = document.getElementById('model-select');
-    if (sel) fd.append('model', sel.value);
+    if (activeModel) fd.append('model', activeModel);
 
     const resp = await fetch('/chat', { method: 'POST', body: fd });
     if (!resp.ok) {
@@ -454,12 +519,12 @@ form.addEventListener('submit', async e => {
       return;
     }
 
-    const reader  = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let lineBuf   = '';
+    activeReader     = resp.body.getReader();
+    const decoder    = new TextDecoder();
+    let lineBuf      = '';
 
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await activeReader.read();
       if (done) break;
 
       lineBuf += decoder.decode(value, { stream: true });
@@ -483,8 +548,8 @@ form.addEventListener('submit', async e => {
           }
           if (chunk.response) {
             if (!firstToken) {
-              firstToken        = true;
-              modelReady        = true;
+              firstToken         = true;
+              modelReady         = true;
               clearTimeout(loadingHint);
               bubble.textContent = '';
             }
@@ -497,11 +562,11 @@ form.addEventListener('submit', async e => {
     parser.flush();
 
   } catch (err) {
-    bubble.textContent = `Connection error: ${err.message}`;
+    if (err.name !== 'AbortError') bubble.textContent = `Connection error: ${err.message}`;
   } finally {
+    activeReader = null;
     clearTimeout(loadingHint);
 
-    // Full markdown+LaTeX render once streaming is complete
     if (responseText) bubble.innerHTML = renderContent(responseText);
     if (think && thinkText) {
       think.body.innerHTML = renderContent(thinkText);
@@ -518,6 +583,20 @@ form.addEventListener('submit', async e => {
     jumpBtn.classList.remove('lit');
     loadSessions();
   }
+});
+
+// ── Stream interrupt modal ───────────────────────────────────
+document.getElementById('streamInterruptCancel').addEventListener('click', () => {
+  document.getElementById('streamInterruptModal').classList.remove('open');
+  pendingSwitchModel = null;
+});
+
+document.getElementById('streamInterruptConfirm').addEventListener('click', () => {
+  document.getElementById('streamInterruptModal').classList.remove('open');
+  const target = pendingSwitchModel;
+  pendingSwitchModel = null;
+  doModelSwitch(target);
+  activeReader?.cancel();
 });
 
 // ── Documents (RAG context) ──────────────────────────────────
@@ -556,7 +635,7 @@ function renderDocList(docs) {
 
   docList.innerHTML = '';
   docs.forEach(doc => {
-    const isIngesting = doc.ingesting || ingestingSet.has(doc.name);
+    const isIngesting  = doc.ingesting || ingestingSet.has(doc.name);
     const justFinished = !isIngesting && doc.ingested && prev[doc.name] === false;
 
     const item = document.createElement('div');
@@ -616,9 +695,8 @@ async function summarizeDocument(filename, btn) {
   openModal(title, null);
 
   try {
-    const sel = document.getElementById('model-select');
     const fd = new FormData();
-    if (sel) fd.append('model', sel.value);
+    if (activeModel) fd.append('model', activeModel);
 
     const resp = await fetch(`/documents/${encodeURIComponent(filename)}/summary`, {
       method: 'POST',
@@ -666,5 +744,6 @@ document.addEventListener('keydown', e => {
 });
 
 // ── Init ─────────────────────────────────────────────────────
+fetch('/models/active').then(r => r.json()).then(d => { activeModel = d.model ?? null; });
 loadSessions();
 loadDocuments();
