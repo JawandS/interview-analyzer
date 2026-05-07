@@ -6,7 +6,10 @@
       "PowerShell(curl.exe -v -X POST http://localhost:11434/api/embed -H \"Content-Type: application/json\" -d \"{\\\\\"model\\\\\": \\\\\"mxbai-embed-large\\\\\", \\\\\"input\\\\\": \\\\\"test\\\\\"}\" 2>&1)",
       "PowerShell($body = '{\"model\": \"mxbai-embed-large\", \"input\": \"test\"}'; curl.exe -s -X POST http://localhost:11434/api/embed -H \"Content-Type: application/json\" -d $body)",
       "PowerShell(Invoke-RestMethod -Method Post -Uri http://localhost:11434/api/embed -ContentType \"application/json\" -Body '{\"model\": \"mxbai-embed-large\", \"input\": \"test\"}' | ConvertTo-Json -Depth 3 | Select-Object -First 5)",
-      "PowerShell(Get-ChildItem app/static/vendor -File | Select-Object Name, @{N='KB';E={[math]::Round\\($_.Length/1KB,1\\)}})"
+      "PowerShell(Get-ChildItem app/static/vendor -File | Select-Object Name, @{N='KB';E={[math]::Round\\($_.Length/1KB,1\\)}})",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\jawan\\\\Desktop\\\\code\\\\interview-analyzer\" -Recurse -Include \"*.css\", \"*.html\" -File)",
+      "Bash(Select-Object FullName)",
+      "Bash(Sort-Object FullName)"
     ]
   }
 }

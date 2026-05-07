@@ -20,7 +20,7 @@
 }
 
 .sidebar-top {
-  padding: 0.65rem 0.55rem;
+  padding: 0.85rem 0.9rem;
   border-bottom: 1px solid var(--border-hard);
   flex-shrink: 0;
   transition: border-color 0.35s;
@@ -30,13 +30,13 @@
 .new-chat-btn {
   display: block;
   width: 100%;
-  padding: 0.42rem 0.7rem;
+  padding: 0.55rem 0.8rem;
   background: var(--accent-dim);
   border: 1px solid var(--border-hard);
   border-radius: 4px;
   color: var(--text);
   font-family: "Consolas", "Menlo", "Courier New", monospace;
-  font-size: 0.74rem;
+  font-size: var(--fs-mono);
   letter-spacing: 0.08em;
   text-align: left;
   cursor: pointer;
@@ -54,23 +54,24 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0.35rem 0.4rem;
+  padding: 0.5rem 0.6rem;
   scrollbar-width: thin;
   scrollbar-color: var(--border-hard) transparent;
 }
 
-.session-list::-webkit-scrollbar { width: 3px; }
-.session-list::-webkit-scrollbar-thumb { background: var(--border-hard); border-radius: 2px; }
+.session-list::-webkit-scrollbar { width: 6px; }
+.session-list::-webkit-scrollbar-thumb { background: var(--border-hard); border-radius: 3px; }
+.session-list::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
 .session-item {
-  padding: 0.44rem 0.55rem;
+  padding: 0.55rem 0.65rem;
   border-radius: 4px;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.45rem;
   min-width: 0;
-  margin-bottom: 1px;
+  margin-bottom: 2px;
   border-left: 2px solid transparent;
   transition: background 0.12s, border-color 0.12s;
 }
@@ -80,8 +81,15 @@
 }
 
 .session-item.active {
-  background: var(--accent-dim);
+  background: var(--accent-hover);
   border-left-color: var(--accent);
+  border-left-width: 3px;
+  padding-left: calc(0.65rem - 1px);
+}
+
+.session-item.active .session-title {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .session-info {
@@ -91,7 +99,7 @@
 
 .session-title {
   font-family: "Consolas", "Menlo", "Courier New", monospace;
-  font-size: 0.76rem;
+  font-size: var(--fs-mono);
   letter-spacing: 0.02em;
   color: var(--text);
   white-space: nowrap;
@@ -102,9 +110,10 @@
 
 .session-date {
   font-family: "Consolas", "Menlo", "Courier New", monospace;
-  font-size: 0.67rem;
+  font-size: var(--fs-mono-sm);
   color: var(--muted);
-  margin-top: 0.12rem;
+  margin-top: 0.2rem;
+  opacity: 0.8;
   transition: color 0.35s;
 }
 
@@ -163,44 +172,44 @@
 }
 
 .doc-section-hd {
-  padding: 0.45rem 0.6rem 0.25rem;
+  padding: 0.7rem 0.9rem 0.35rem;
   flex-shrink: 0;
 }
 
 .doc-section-label {
   font-family: "Consolas", "Menlo", "Courier New", monospace;
-  font-size: 0.65rem;
+  font-size: var(--fs-mono-sm);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted);
-  opacity: 0.7;
 }
 
 .doc-list {
   flex: 1;
   overflow-y: auto;
-  padding: 0 0.4rem 0.45rem;
+  padding: 0 0.6rem 0.6rem;
   scrollbar-width: thin;
   scrollbar-color: var(--border-hard) transparent;
 }
 
-.doc-list::-webkit-scrollbar { width: 3px; }
-.doc-list::-webkit-scrollbar-thumb { background: var(--border-hard); border-radius: 2px; }
+.doc-list::-webkit-scrollbar { width: 6px; }
+.doc-list::-webkit-scrollbar-thumb { background: var(--border-hard); border-radius: 3px; }
+.doc-list::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
 .doc-empty {
   display: block;
   font-family: "Consolas", "Menlo", "Courier New", monospace;
-  font-size: 0.68rem;
+  font-size: var(--fs-mono-sm);
   color: var(--muted);
-  opacity: 0.45;
+  opacity: 0.6;
   padding: 0.25rem 0.3rem;
 }
 
 .doc-item {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.28rem 0.3rem;
+  gap: 0.45rem;
+  padding: 0.45rem 0.5rem;
   border-radius: 3px;
   min-width: 0;
   border-left: 2px solid transparent;
@@ -228,7 +237,7 @@
 .doc-name {
   flex: 1;
   font-family: "Consolas", "Menlo", "Courier New", monospace;
-  font-size: 0.7rem;
+  font-size: var(--fs-mono-sm);
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -249,10 +258,10 @@
 
 .doc-ingest-btn {
   flex-shrink: 0;
-  padding: 0.14rem 0.4rem;
+  padding: 0.25rem 0.55rem;
   font-family: "Consolas", "Menlo", "Courier New", monospace;
-  font-size: 0.54rem;
-  letter-spacing: 0.06em;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   background: var(--accent-dim);
   border: 1px solid var(--border-hard);
@@ -277,10 +286,10 @@
 
 .doc-summary-btn {
   flex-shrink: 0;
-  padding: 0.14rem 0.4rem;
+  padding: 0.25rem 0.55rem;
   font-family: "Consolas", "Menlo", "Courier New", monospace;
-  font-size: 0.54rem;
-  letter-spacing: 0.06em;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   background: rgba(90, 158, 111, 0.08);
   border: 1px solid rgba(90, 158, 111, 0.3);

@@ -29,9 +29,27 @@ def _ollama_host() -> str:
 
 OLLAMA_BASE   = f"http://{_ollama_host()}:11434"
 DEFAULT_MODEL = "gemma4:e4b"
-KEEP_ALIVE    = "30m"
+KEEP_ALIVE    = "-1"
 DB_PATH       = Path(__file__).parent.parent / "data" / "interview-analyzer.db"
 SUMMARIES_DIR = Path(__file__).parent.parent / "data" / "summaries"
+SETTINGS_PATH = Path(__file__).parent.parent / "data" / "settings.json"
+
+
+def _load_settings() -> dict:
+    if SETTINGS_PATH.exists():
+        try:
+            return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_settings(data: dict) -> None:
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS_PATH.write_text(json.dumps(data), encoding="utf-8")
+
+
+_active_model: str = _load_settings().get("model", DEFAULT_MODEL)
 
 
 async def _init_db():
@@ -65,12 +83,23 @@ async def _init_db():
         await db.commit()
 
 
-async def _warmup():
+async def _warmup(model: str) -> None:
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             await client.post(
                 f"{OLLAMA_BASE}/api/generate",
-                json={"model": DEFAULT_MODEL, "prompt": "", "stream": False, "keep_alive": KEEP_ALIVE, "think": True},
+                json={"model": model, "prompt": "", "stream": False, "keep_alive": KEEP_ALIVE, "think": True},
+            )
+    except Exception:
+        pass
+
+
+async def _unload(model: str) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(
+                f"{OLLAMA_BASE}/api/generate",
+                json={"model": model, "prompt": "", "stream": False, "keep_alive": 0},
             )
     except Exception:
         pass
@@ -80,7 +109,7 @@ async def _warmup():
 async def lifespan(_: FastAPI):
     logging.basicConfig(level=logging.INFO)
     await _init_db()
-    asyncio.create_task(_warmup())
+    asyncio.create_task(_warmup(_active_model))
     yield
 
 
@@ -106,7 +135,7 @@ async def list_models():
         if not names:
             return '<span class="model-error">No models installed</span>'
         options = "\n".join(
-            f'<option value="{html.escape(n)}"{"selected" if n == DEFAULT_MODEL else ""}>'
+            f'<option value="{html.escape(n)}"{"selected" if n == _active_model else ""}>'
             f'{html.escape(n)}</option>'
             for n in names
         )
@@ -116,6 +145,22 @@ async def list_models():
         )
     except Exception:
         return '<span class="model-error">Ollama unreachable</span>'
+
+
+@app.post("/models/switch")
+async def switch_model(new_model: str = Form(...), old_model: str = Form(default="")):
+    global _active_model
+    if old_model and old_model != new_model:
+        asyncio.create_task(_unload(old_model))
+    _active_model = new_model
+    _save_settings({"model": new_model})
+    asyncio.create_task(_warmup(new_model))
+    return {"ok": True, "model": new_model}
+
+
+@app.get("/models/active")
+async def get_active_model():
+    return {"model": _active_model}
 
 
 # ── Sessions ──────────────────────────────────────────────────

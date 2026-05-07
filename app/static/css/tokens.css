@@ -6,14 +6,29 @@
   --border:        rgba(184, 114, 42, 0.18);
   --border-hard:   #d4c9b8;
   --accent:        #b8722a;
-  --accent-dim:    rgba(184, 114, 42, 0.09);
+  --accent-dim:    rgba(184, 114, 42, 0.13);
+  --accent-hover:  rgba(184, 114, 42, 0.20);
+  --focus-ring:    rgba(184, 114, 42, 0.35);
   --text:          #2a2018;
-  --muted:         #8a7a66;
+  --muted:         #7a6a54;
   --grid:          rgba(184, 114, 42, 0.07);
   --glow:          rgba(184, 114, 42, 0.15);
   --shadow:        rgba(42, 32, 24, 0.14);
   --think-bg:      rgba(184, 114, 42, 0.055);
   --think-border:  rgba(184, 114, 42, 0.18);
+
+  /* ── Type scale ───────────────────────────────── */
+  --fs-micro:   0.6875rem;
+  --fs-mono-sm: 0.75rem;
+  --fs-mono:    0.8125rem;
+  --fs-body:    0.9375rem;
+
+  /* ── Radius scale ─────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 [data-theme="dark"] {
   --bg:            #12100e;
