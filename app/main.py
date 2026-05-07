@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import asyncio
 import aiosqlite
+import fitz  # PyMuPDF
 import html
 import httpx
 import json
@@ -30,6 +31,7 @@ OLLAMA_BASE   = f"http://{_ollama_host()}:11434"
 DEFAULT_MODEL = "gemma4:e4b"
 KEEP_ALIVE    = "30m"
 DB_PATH       = Path(__file__).parent.parent / "data" / "interview-analyzer.db"
+SUMMARIES_DIR = Path(__file__).parent.parent / "data" / "summaries"
 
 
 async def _init_db():
@@ -81,6 +83,8 @@ async def lifespan(_: FastAPI):
     asyncio.create_task(_warmup())
     yield
 
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Interview Analyzer", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -208,6 +212,61 @@ async def trigger_ingest(background_tasks: BackgroundTasks, filename: str = Form
     _ingesting_files.add(filename)
     background_tasks.add_task(_do_ingest, filename)
     return {"status": "started"}
+
+
+# ── Document summaries ───────────────────────────────────────
+
+@app.get("/documents/{filename}/summary")
+async def get_summary(filename: str):
+    stem = Path(filename).stem
+    summary_path = SUMMARIES_DIR / f"{stem}.md"
+    if summary_path.exists():
+        return {"summary": summary_path.read_text(encoding="utf-8"), "cached": True}
+    raise HTTPException(status_code=404, detail="No summary cached")
+
+
+@app.post("/documents/{filename}/summary")
+async def create_summary(filename: str, model: str = Form(default=DEFAULT_MODEL)):
+    pdf_path = rag.DATA_DIR / filename
+    if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    stem = Path(filename).stem
+    summary_path = SUMMARIES_DIR / f"{stem}.md"
+
+    if summary_path.exists():
+        return {"summary": summary_path.read_text(encoding="utf-8"), "cached": True}
+
+    def _read_pdf():
+        doc = fitz.open(str(pdf_path))
+        return "".join(page.get_text() for page in doc)
+
+    text = await asyncio.to_thread(_read_pdf)
+    excerpt = text[:8000]
+
+    prompt = (
+        "Provide a structured summary of the following interview document. "
+        "Include: main topics, key themes, notable quotes, any methodology, "
+        "and overall findings. Use markdown headings and bullet points.\n\n"
+        f"Document: {filename}\n\n{excerpt}"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            resp = await client.post(
+                f"{OLLAMA_BASE}/api/generate",
+                json={"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE},
+            )
+            resp.raise_for_status()
+            summary_text = resp.json().get("response", "")
+    except Exception as e:
+        logger.error("Summary generation failed for %s: %s", filename, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(summary_text, encoding="utf-8")
+
+    return {"summary": summary_text, "cached": False}
 
 
 # ── Chat ──────────────────────────────────────────────────────

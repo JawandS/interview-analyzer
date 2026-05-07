@@ -57,6 +57,7 @@
     </aside>
 
     <div class="main-col">
+      <button id="jumpBtn" class="jump-btn" aria-label="Catch up to latest">↓ Catch up</button>
       <div id="messages">
         <div class="message assistant">
           <span class="label">Analyst</span>
@@ -80,6 +81,16 @@
           </form>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="summaryModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <span class="modal-title" id="modalTitle"></span>
+        <button class="modal-close" id="modalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body bubble" id="modalBody"></div>
     </div>
   </div>
 

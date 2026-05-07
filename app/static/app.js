@@ -104,7 +104,29 @@ document.body.addEventListener('htmx:afterSwap', () => {
 });
 
 // ── DOM helpers ──────────────────────────────────────────────
-const msgs = document.getElementById('messages');
+const msgs    = document.getElementById('messages');
+const jumpBtn = document.getElementById('jumpBtn');
+
+function isNearBottom() {
+  return msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
+}
+
+function notifyNewToken() {
+  if (!isNearBottom()) jumpBtn.classList.add('visible', 'lit');
+}
+
+msgs.addEventListener('scroll', () => {
+  if (isNearBottom()) {
+    jumpBtn.classList.remove('visible', 'lit');
+  } else {
+    jumpBtn.classList.add('visible');
+  }
+});
+
+jumpBtn.addEventListener('click', () => {
+  msgs.scrollTop = msgs.scrollHeight;
+  jumpBtn.classList.remove('visible', 'lit');
+});
 
 const GREETING = `<div class="message assistant">
   <span class="label">Analyst</span>
@@ -254,7 +276,7 @@ async function loadSession(id) {
       msgs.appendChild(wrap);
     }
   });
-  msgs.scrollTop = 999999;
+  msgs.scrollTop = msgs.scrollHeight;
 
   document.querySelectorAll('.session-item').forEach(el => {
     el.classList.toggle('active', parseInt(el.dataset.id) === id);
@@ -315,7 +337,7 @@ form.addEventListener('submit', async e => {
 
   const { wrap, bubble } = makeAssistantShell();
   msgs.appendChild(wrap);
-  msgs.scrollTop = 999999;
+  msgs.scrollTop = msgs.scrollHeight;
 
   let firstToken   = false;
   let responseText = '';
@@ -334,7 +356,7 @@ form.addEventListener('submit', async e => {
       }
       think.body.textContent += chunk;
       think.body.scrollTop    = think.body.scrollHeight;
-      msgs.scrollTop          = 999999;
+      notifyNewToken();
     },
     chunk => {
       if (isThinking) {
@@ -345,7 +367,7 @@ form.addEventListener('submit', async e => {
       }
       responseText       += chunk;
       bubble.innerHTML    = marked.parse(responseText);
-      msgs.scrollTop      = 999999;
+      notifyNewToken();
     }
   );
 
@@ -414,7 +436,7 @@ form.addEventListener('submit', async e => {
       think.details.open = false;
     }
     delete document.body.dataset.streaming;
-    msgs.scrollTop = 999999;
+    jumpBtn.classList.remove('lit');
     loadSessions();
   }
 });
@@ -475,6 +497,13 @@ function renderDocList(docs) {
       check.className = 'doc-check';
       check.textContent = '✓';
       item.appendChild(check);
+
+      const sumBtn = document.createElement('button');
+      sumBtn.className = 'doc-summary-btn';
+      sumBtn.textContent = 'Summary';
+      sumBtn.title = 'Generate or view summary';
+      sumBtn.addEventListener('click', () => summarizeDocument(doc.name, sumBtn));
+      item.appendChild(sumBtn);
     } else {
       const btn = document.createElement('button');
       btn.className = 'doc-ingest-btn';
@@ -499,6 +528,63 @@ async function ingestDocument(filename) {
   clearTimeout(docPollTimer);
   docPollTimer = setTimeout(loadDocuments, 2500);
 }
+
+async function summarizeDocument(filename, btn) {
+  btn.disabled = true;
+  btn.textContent = '···';
+
+  const title = filename.replace(/\.pdf$/i, '');
+  openModal(title, null);
+
+  try {
+    const sel = document.getElementById('model-select');
+    const fd = new FormData();
+    if (sel) fd.append('model', sel.value);
+
+    const resp = await fetch(`/documents/${encodeURIComponent(filename)}/summary`, {
+      method: 'POST',
+      body: fd,
+    });
+    if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+    const data = await resp.json();
+    showModalContent(data.summary);
+  } catch (err) {
+    showModalContent(`**Error generating summary:** ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Summary';
+  }
+}
+
+// ── Summary modal ────────────────────────────────────────────
+const modalOverlay = document.getElementById('summaryModal');
+const modalTitle   = document.getElementById('modalTitle');
+const modalBody    = document.getElementById('modalBody');
+const modalClose   = document.getElementById('modalClose');
+
+function openModal(title, content) {
+  modalTitle.textContent = title;
+  modalBody.innerHTML = content === null
+    ? '<span class="modal-loading">Generating summary…</span>'
+    : marked.parse(content);
+  modalOverlay.classList.add('open');
+}
+
+function showModalContent(content) {
+  modalBody.innerHTML = marked.parse(content);
+}
+
+function closeModal() {
+  modalOverlay.classList.remove('open');
+}
+
+modalClose.addEventListener('click', closeModal);
+modalOverlay.addEventListener('click', e => {
+  if (e.target === modalOverlay) closeModal();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
 
 // ── Init ─────────────────────────────────────────────────────
 loadSessions();
