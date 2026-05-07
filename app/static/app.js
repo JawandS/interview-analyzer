@@ -729,6 +729,8 @@ async function summarizeDocument(filename, btn) {
             showModalContent(`**Error:** ${msg.error}`);
           } else if (msg.stage === 'cached' || msg.stage === 'done') {
             showModalContent(msg.summary);
+          } else if (msg.stage === 'map_cached') {
+            updateSummaryProgress('Using cached passages…', 1);
           } else if (msg.stage === 'map') {
             updateSummaryProgress(`Reading passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total);
           } else if (msg.stage === 'reduce') {
@@ -782,6 +784,8 @@ async function extractDocument(filename, btn) {
             showModalContent(`**Error:** ${msg.error}`);
           } else if (msg.stage === 'cached' || msg.stage === 'done') {
             showExtractionCard(msg.data);
+          } else if (msg.stage === 'map_cached') {
+            updateSummaryProgress('Using cached passages…', 1);
           } else if (msg.stage === 'map') {
             updateSummaryProgress(`Scanning passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total);
           } else if (msg.stage === 'reduce') {

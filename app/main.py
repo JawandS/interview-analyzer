@@ -34,6 +34,7 @@ KEEP_ALIVE    = -1
 DB_PATH       = Path(__file__).parent.parent / "data" / "interview-analyzer.db"
 SUMMARIES_DIR   = Path(__file__).parent.parent / "data" / "summaries"
 EXTRACTIONS_DIR = Path(__file__).parent.parent / "data" / "extractions"
+MAPS_DIR        = Path(__file__).parent.parent / "data" / "maps"
 SETTINGS_PATH   = Path(__file__).parent.parent / "data" / "settings.json"
 
 
@@ -281,6 +282,23 @@ async def get_summary(filename: str):
     raise HTTPException(status_code=404, detail="No summary cached")
 
 
+def _load_map_cache(filename: str, kind: str) -> list[str] | None:
+    path = MAPS_DIR / kind / f"{Path(filename).stem}.json"
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return None
+
+
+def _save_map_cache(filename: str, kind: str, results: list[str]) -> None:
+    (MAPS_DIR / kind).mkdir(parents=True, exist_ok=True)
+    (MAPS_DIR / kind / f"{Path(filename).stem}.json").write_text(
+        json.dumps(results, ensure_ascii=False), encoding="utf-8"
+    )
+
+
 _MAP_BATCH_SIZE = 20
 
 _MAP_PROMPT = """\
@@ -426,14 +444,20 @@ async def create_extraction(
                 out = "nothing notable."
             await queue.put((idx, out))
 
-        map_results: list[str] = ["nothing notable."] * n
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            tasks = [asyncio.create_task(_run_map(client, i, batch)) for i, batch in enumerate(batches)]
-            for done in range(1, n + 1):
-                idx, out = await queue.get()
-                map_results[idx] = out
-                yield json.dumps({"stage": "map", "batch": done, "total": n}) + "\n"
-            await asyncio.gather(*tasks)
+        cached_map = None if regenerate else _load_map_cache(filename, "extract")
+        if cached_map is not None:
+            map_results = cached_map
+            yield json.dumps({"stage": "map_cached", "total": len(map_results)}) + "\n"
+        else:
+            map_results = ["nothing notable."] * n
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                tasks = [asyncio.create_task(_run_map(client, i, batch)) for i, batch in enumerate(batches)]
+                for done in range(1, n + 1):
+                    idx, out = await queue.get()
+                    map_results[idx] = out
+                    yield json.dumps({"stage": "map", "batch": done, "total": n}) + "\n"
+                await asyncio.gather(*tasks)
+            _save_map_cache(filename, "extract", map_results)
 
         map_outputs = [
             f"[Batch {i + 1}/{n}]\n{out}"
@@ -510,14 +534,20 @@ async def create_summary(
                 out = "nothing notable."
             await queue.put((idx, out))
 
-        map_results: list[str] = ["nothing notable."] * n
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            tasks = [asyncio.create_task(_run_map(client, i, batch)) for i, batch in enumerate(batches)]
-            for done in range(1, n + 1):
-                idx, out = await queue.get()
-                map_results[idx] = out
-                yield json.dumps({"stage": "map", "batch": done, "total": n}) + "\n"
-            await asyncio.gather(*tasks)
+        cached_map = None if regenerate else _load_map_cache(filename, "summary")
+        if cached_map is not None:
+            map_results = cached_map
+            yield json.dumps({"stage": "map_cached", "total": len(map_results)}) + "\n"
+        else:
+            map_results = ["nothing notable."] * n
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                tasks = [asyncio.create_task(_run_map(client, i, batch)) for i, batch in enumerate(batches)]
+                for done in range(1, n + 1):
+                    idx, out = await queue.get()
+                    map_results[idx] = out
+                    yield json.dumps({"stage": "map", "batch": done, "total": n}) + "\n"
+                await asyncio.gather(*tasks)
+            _save_map_cache(filename, "summary", map_results)
 
         map_outputs: list[str] = [
             f"[Batch {i + 1}/{n}]\n{out}"
