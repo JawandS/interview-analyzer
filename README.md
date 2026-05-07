@@ -61,8 +61,10 @@ The app starts at `http://localhost:8000`. The SQLite database (`data/interview-
 
 **Document summaries**
 - Each PDF in the sidebar has a "Summary" action (`POST /documents/{filename}/summary`).
-- Sends the first 8,000 characters of the document to the active model with a structured prompt, then caches the result as markdown in `data/summaries/`.
-- Subsequent requests for the same document return the cached summary instantly.
+- Uses a map-reduce pipeline over RAG chunks: batches of 20 chunks (~10k chars each) are sent to the model to extract notes, then all notes are synthesized in a single reduce call into a structured markdown summary (Interviewee Profile, Key Stances, Internal Tensions, Notable Quotes, Recurring Themes).
+- Falls back to reading the PDF directly if the document hasn't been ingested yet.
+- Results are cached in `data/summaries/`. Add `?regenerate=true` to bypass the cache and rerun.
+- Long documents may take 2–5 minutes to summarize (map calls are sequential).
 
 **Streaming responses with chain-of-thought**
 - Ollama responses stream as NDJSON. The browser's `ThinkParser` splits `<think>...</think>` tokens from response tokens in real time.
@@ -97,7 +99,7 @@ The app starts at `http://localhost:8000`. The SQLite database (`data/interview-
 - **Ollama must be running locally.** There is no support for remote inference endpoints. If Ollama is unreachable on port 11434, all chat and ingestion will fail.
 - **PDFs must be placed manually.** There is no file upload UI. Files must be copied into `app/static/data/` on the filesystem.
 - **Ingestion is sequential.** Each chunk is embedded one at a time. Ingesting a large PDF can take several minutes.
-- **Summary generation is single-shot.** Only the first 8,000 characters of a PDF are sent to the model. Long documents will have incomplete summaries. There is no regeneration option — delete the cached file in `data/summaries/` to regenerate.
+- **Summary generation is slow for long documents.** Map calls are sequential (Ollama is local). A 30-page transcript may take 2–5 minutes. Use `?regenerate=true` to bypass the cache if you change the model or want to rerun.
 - **No authentication or multi-user support.** Anyone with network access to port 8000 can read all sessions and documents.
 - **Windows vs. Linux/WSL2.** On Windows, Ollama is reached at `localhost:11434`. On Linux, the app auto-detects the default gateway IP to support WSL2 setups where Ollama runs on the Windows host.
 - **Single ChromaDB collection.** All ingested PDFs share one collection (`"interviews"`). There is no per-document namespace, so RAG retrieval draws from the entire corpus regardless of which document is selected in the UI.
