@@ -15,7 +15,7 @@
 #messages::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
 .message {
-  max-width: 760px;
+  max-width: 1100px;
   width: 100%;
   margin: 0 auto;
   padding: 0 1.4rem;
@@ -45,7 +45,7 @@
 
 /* ── Bubble ───────────────────────────────────── */
 .bubble {
-  max-width: min(600px, 86%);
+  max-width: min(720px, 92%);
   padding: 0.95rem 1.15rem;
   line-height: 1.78;
   font-size: 0.94rem;
@@ -70,6 +70,7 @@
   border-bottom-left-radius: 0;
   padding-left: 1.25rem;
   box-shadow: 0 2px 16px var(--shadow), 0 0 0 1px var(--accent-dim);
+  max-width: 100%;
 }
 
 .bubble.streaming::after {
