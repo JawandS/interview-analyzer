@@ -22,7 +22,7 @@ function setTheme(t) {
 themeBtn.addEventListener('click', () =>
   setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark')
 );
-setTheme(localStorage.getItem('theme') || 'dark');
+setTheme(localStorage.getItem('theme') || 'light');
 
 // ── Sidebar toggle ───────────────────────────────────────────
 const sidebar    = document.getElementById('sidebar');

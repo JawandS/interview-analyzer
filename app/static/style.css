@@ -1,21 +1,5 @@
 /* ── Theme tokens ─────────────────────────────── */
 :root {
-  --bg:            #12100e;
-  --surface:       rgba(28, 25, 22, 0.72);
-  --surface-solid: #1c1916;
-  --border:        rgba(212, 145, 74, 0.14);
-  --border-hard:   #2e2a26;
-  --accent:        #d4914a;
-  --accent-dim:    rgba(212, 145, 74, 0.11);
-  --text:          #e8e2d8;
-  --muted:         #7a6f64;
-  --grid:          rgba(212, 145, 74, 0.055);
-  --glow:          rgba(212, 145, 74, 0.18);
-  --shadow:        rgba(0, 0, 0, 0.45);
-  --think-bg:      rgba(212, 145, 74, 0.055);
-  --think-border:  rgba(212, 145, 74, 0.18);
-}
-[data-theme="light"] {
   --bg:            #faf7f2;
   --surface:       rgba(240, 235, 226, 0.75);
   --surface-solid: #f0ebe2;
@@ -30,6 +14,22 @@
   --shadow:        rgba(42, 32, 24, 0.14);
   --think-bg:      rgba(184, 114, 42, 0.055);
   --think-border:  rgba(184, 114, 42, 0.18);
+}
+[data-theme="dark"] {
+  --bg:            #12100e;
+  --surface:       rgba(28, 25, 22, 0.72);
+  --surface-solid: #1c1916;
+  --border:        rgba(212, 145, 74, 0.14);
+  --border-hard:   #2e2a26;
+  --accent:        #d4914a;
+  --accent-dim:    rgba(212, 145, 74, 0.11);
+  --text:          #e8e2d8;
+  --muted:         #7a6f64;
+  --grid:          rgba(212, 145, 74, 0.055);
+  --glow:          rgba(212, 145, 74, 0.18);
+  --shadow:        rgba(0, 0, 0, 0.45);
+  --think-bg:      rgba(212, 145, 74, 0.055);
+  --think-border:  rgba(212, 145, 74, 0.18);
 }
 
 /* ── Reset ────────────────────────────────────── */
@@ -280,15 +280,15 @@ body::before, body::after {
   z-index: 9000;
 }
 body::before {
-  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.28) 100%);
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(42,32,24,0.08) 100%);
 }
 body::after {
   opacity: 0.028;
   mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='256' height='256' filter='url(%23n)'/%3E%3C/svg%3E");
 }
-[data-theme="light"] body::before {
-  background: radial-gradient(ellipse at center, transparent 55%, rgba(42,32,24,0.08) 100%);
+[data-theme="dark"] body::before {
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.28) 100%);
 }
 
 /* ── Header — 3-col grid so center is truly centered ─ */
@@ -523,10 +523,10 @@ header {
   stroke-linejoin: round;
 }
 
-.icon-moon { display: none; }
-.icon-sun  { display: block; }
-[data-theme="light"] .icon-moon { display: block; }
-[data-theme="light"] .icon-sun  { display: none; }
+.icon-moon { display: block; }
+.icon-sun  { display: none; }
+[data-theme="dark"] .icon-moon { display: none; }
+[data-theme="dark"] .icon-sun  { display: block; }
 
 /* ── Messages ─────────────────────────────────── */
 #messages {
@@ -786,15 +786,15 @@ body[data-streaming] button[type="submit"] {
 .bubble code {
   font-family: "Consolas", "Menlo", "Courier New", monospace;
   font-size: 0.83em;
-  background: rgba(0, 0, 0, 0.22);
+  background: rgba(0, 0, 0, 0.06);
   border: 1px solid var(--border-hard);
   padding: 0.1em 0.34em;
   border-radius: 3px;
 }
-[data-theme="light"] .bubble code { background: rgba(0, 0, 0, 0.06); }
+[data-theme="dark"] .bubble code { background: rgba(0, 0, 0, 0.22); }
 
 .bubble pre {
-  background: rgba(0, 0, 0, 0.28);
+  background: rgba(0, 0, 0, 0.04);
   border: 1px solid var(--border-hard);
   border-radius: 5px;
   padding: 0.75em 0.9em;
@@ -803,7 +803,7 @@ body[data-streaming] button[type="submit"] {
   scrollbar-width: thin;
   scrollbar-color: var(--border-hard) transparent;
 }
-[data-theme="light"] .bubble pre { background: rgba(0, 0, 0, 0.04); }
+[data-theme="dark"] .bubble pre { background: rgba(0, 0, 0, 0.28); }
 
 .bubble pre code {
   background: none;
