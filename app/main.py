@@ -29,7 +29,7 @@ def _ollama_host() -> str:
 
 OLLAMA_BASE   = f"http://{_ollama_host()}:11434"
 DEFAULT_MODEL = "gemma4:e4b"
-KEEP_ALIVE    = "-1"
+KEEP_ALIVE    = -1
 DB_PATH       = Path(__file__).parent.parent / "data" / "interview-analyzer.db"
 SUMMARIES_DIR = Path(__file__).parent.parent / "data" / "summaries"
 SETTINGS_PATH = Path(__file__).parent.parent / "data" / "settings.json"
