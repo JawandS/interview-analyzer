@@ -55,16 +55,22 @@ The app starts at `http://localhost:8000`. The SQLite database (`data/interview-
 - Model selection is persisted across restarts in `data/settings.json`.
 
 **RAG over interview PDFs**
-- Drop PDFs into `app/static/data/`. They appear in the sidebar for ingestion.
-- Ingestion: extracts text via PyMuPDF, chunks at 500 characters with 50-character overlap, embeds each chunk via `mxbai-embed-large`, and upserts into ChromaDB (`data/chroma/`).
-- At query time, the user message is embedded and the top-5 most similar chunks are retrieved and injected into the system prompt.
+- Upload PDFs via the `+` button in the sidebar, or drop them directly into `app/static/data/`. They appear in the sidebar for ingestion.
+- Ingestion: extracts text via PyMuPDF, chunks at 500 characters with 50-character overlap, embeds each chunk via `mxbai-embed-large`, and upserts into a per-document ChromaDB collection (`data/chroma/`).
+- At query time, the user message is embedded and the top-5 most similar chunks are retrieved across all ingested documents, with at least one chunk guaranteed from each document to prevent any single interview from dominating the context.
 
 **Document summaries**
-- Each PDF in the sidebar has a "Summary" action (`POST /documents/{filename}/summary`).
-- Uses a map-reduce pipeline over RAG chunks: batches of 20 chunks (~10k chars each) are sent to the model to extract notes, then all notes are synthesized in a single reduce call into a structured markdown summary (Interviewee Profile, Key Stances, Internal Tensions, Notable Quotes, Recurring Themes).
+- Each ingested PDF in the sidebar has a "Summary" action (`POST /documents/{filename}/summary`).
+- Uses a concurrent map-reduce pipeline over RAG chunks: batches of 20 chunks are sent to the model in parallel to extract notes, then all notes are synthesized in a single reduce call into a structured markdown summary (Interviewee Profile, Key Stances, Internal Tensions, Notable Quotes, Recurring Themes).
 - Falls back to reading the PDF directly if the document hasn't been ingested yet.
 - Results are cached in `data/summaries/`. Add `?regenerate=true` to bypass the cache and rerun.
-- Long documents may take 2–5 minutes to summarize (map calls are sequential).
+- Long documents may take 2–5 minutes to summarize depending on Ollama throughput.
+
+**Structured data extraction**
+- Each ingested PDF has an "Extract" action (`POST /documents/{filename}/extract`) that pulls specific fields out of the transcript into clean structured output.
+- Extracted fields: acreage, grant status, generational status, farm type.
+- Uses the same map-reduce pipeline as summaries: the map step identifies relevant mentions per chunk, and the reduce step consolidates them into a JSON object. Unmentioned fields are `null`.
+- Results are cached in `data/extractions/`. Add `?regenerate=true` to rerun.
 
 **Streaming responses with chain-of-thought**
 - Ollama responses stream as NDJSON. The browser's `ThinkParser` splits `<think>...</think>` tokens from response tokens in real time.
@@ -97,9 +103,8 @@ The app starts at `http://localhost:8000`. The SQLite database (`data/interview-
 ## Limitations
 
 - **Ollama must be running locally.** There is no support for remote inference endpoints. If Ollama is unreachable on port 11434, all chat and ingestion will fail.
-- **PDFs must be placed manually.** There is no file upload UI. Files must be copied into `app/static/data/` on the filesystem.
-- **Ingestion is sequential.** Each chunk is embedded one at a time. Ingesting a large PDF can take several minutes.
-- **Summary generation is slow for long documents.** Map calls are sequential (Ollama is local). A 30-page transcript may take 2–5 minutes. Use `?regenerate=true` to bypass the cache if you change the model or want to rerun.
+- **Ingestion is sequential per chunk.** Each chunk is embedded one at a time via Ollama. Ingesting a large PDF can take several minutes.
+- **Summary and extraction generation is Ollama-bound.** Map calls run concurrently but each is still a local LLM call. A 30-page transcript may take 2–5 minutes. Use `?regenerate=true` to bypass the cache if you change the model or want to rerun.
+- **Extraction reliability depends on the model.** The reduce step asks the model for JSON. A JSON parse fallback is in place, but field values are only as accurate as the model's reading of the transcript.
 - **No authentication or multi-user support.** Anyone with network access to port 8000 can read all sessions and documents.
 - **Windows vs. Linux/WSL2.** On Windows, Ollama is reached at `localhost:11434`. On Linux, the app auto-detects the default gateway IP to support WSL2 setups where Ollama runs on the Windows host.
-- **Single ChromaDB collection.** All ingested PDFs share one collection (`"interviews"`). There is no per-document namespace, so RAG retrieval draws from the entire corpus regardless of which document is selected in the UI.

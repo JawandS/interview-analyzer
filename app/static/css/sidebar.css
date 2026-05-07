@@ -338,3 +338,30 @@
   cursor: not-allowed;
   pointer-events: none;
 }
+
+.doc-extract-btn {
+  flex-shrink: 0;
+  padding: 0.25rem 0.55rem;
+  font-family: "Consolas", "Menlo", "Courier New", monospace;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(180, 130, 70, 0.08);
+  border: 1px solid rgba(180, 130, 70, 0.3);
+  border-radius: 3px;
+  color: #b48246;
+  cursor: pointer;
+  transition: border-color 0.18s, box-shadow 0.18s;
+  white-space: nowrap;
+}
+
+.doc-extract-btn:hover {
+  border-color: #b48246;
+  box-shadow: 0 0 6px rgba(180, 130, 70, 0.3);
+}
+
+.doc-extract-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}

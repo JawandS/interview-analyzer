@@ -662,6 +662,13 @@ function renderDocList(docs) {
       sumBtn.title = 'Generate or view summary';
       sumBtn.addEventListener('click', () => summarizeDocument(doc.name, sumBtn));
       item.appendChild(sumBtn);
+
+      const extBtn = document.createElement('button');
+      extBtn.className = 'doc-extract-btn';
+      extBtn.textContent = 'Extract';
+      extBtn.title = 'Extract structured field data';
+      extBtn.addEventListener('click', () => extractDocument(doc.name, extBtn));
+      item.appendChild(extBtn);
     } else {
       const btn = document.createElement('button');
       btn.className = 'doc-ingest-btn';
@@ -738,6 +745,95 @@ async function summarizeDocument(filename, btn) {
     btn.disabled = false;
     btn.textContent = 'Summary';
   }
+}
+
+async function extractDocument(filename, btn) {
+  btn.disabled = true;
+  btn.textContent = '···';
+
+  const title = filename.replace(/\.pdf$/i, '');
+  openModal('Extract — ' + title, null);
+
+  try {
+    const fd = new FormData();
+    if (activeModel) fd.append('model', activeModel);
+
+    const resp = await fetch(`/documents/${encodeURIComponent(filename)}/extract`, {
+      method: 'POST',
+      body: fd,
+    });
+    if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.error) {
+            showModalContent(`**Error:** ${msg.error}`);
+          } else if (msg.stage === 'cached' || msg.stage === 'done') {
+            showExtractionCard(msg.data);
+          } else if (msg.stage === 'map') {
+            updateSummaryProgress(`Scanning passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total);
+          } else if (msg.stage === 'reduce') {
+            updateSummaryProgress('Synthesizing fields…', 1);
+          }
+        } catch { }
+      }
+    }
+  } catch (err) {
+    showModalContent(`**Error extracting data:** ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Extract';
+  }
+}
+
+function showExtractionCard(data) {
+  const fields = [
+    { key: 'acreage',             label: 'Acreage' },
+    { key: 'grant_status',        label: 'Grant Status' },
+    { key: 'generational_status', label: 'Generation' },
+    { key: 'farm_type',           label: 'Farm Type' },
+  ];
+
+  const table = document.createElement('table');
+  table.className = 'extraction-table';
+
+  fields.forEach(({ key, label }) => {
+    const row = table.insertRow();
+    const th = document.createElement('th');
+    th.textContent = label;
+    const td = document.createElement('td');
+    const val = data[key];
+    td.textContent = val ?? '—';
+    if (!val) td.classList.add('extraction-null');
+    row.appendChild(th);
+    row.appendChild(td);
+  });
+
+  if (data.notes) {
+    const nr = table.insertRow();
+    nr.className = 'extraction-notes-row';
+    const nth = document.createElement('th');
+    nth.textContent = 'Notes';
+    const ntd = document.createElement('td');
+    ntd.textContent = data.notes;
+    nr.appendChild(nth);
+    nr.appendChild(ntd);
+  }
+
+  modalBody.innerHTML = '';
+  modalBody.appendChild(table);
 }
 
 // ── Document upload ──────────────────────────────────────────

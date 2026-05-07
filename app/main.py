@@ -13,6 +13,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import subprocess
 from app import rag
 
@@ -31,8 +32,9 @@ OLLAMA_BASE   = f"http://{_ollama_host()}:11434"
 DEFAULT_MODEL = "gemma4:e4b"
 KEEP_ALIVE    = -1
 DB_PATH       = Path(__file__).parent.parent / "data" / "interview-analyzer.db"
-SUMMARIES_DIR = Path(__file__).parent.parent / "data" / "summaries"
-SETTINGS_PATH = Path(__file__).parent.parent / "data" / "settings.json"
+SUMMARIES_DIR   = Path(__file__).parent.parent / "data" / "summaries"
+EXTRACTIONS_DIR = Path(__file__).parent.parent / "data" / "extractions"
+SETTINGS_PATH   = Path(__file__).parent.parent / "data" / "settings.json"
 
 
 def _load_settings() -> dict:
@@ -317,6 +319,150 @@ using the headings below. Be specific — use the interviewee's own words where 
 ---
 Extracted notes:
 {notes}"""
+
+
+_EXTRACT_MAP_PROMPT = """\
+You are extracting structured field data from an ethnographic interview transcript.
+From this passage, note any EXPLICIT mentions of:
+- ACREAGE: farm size in acres or related land area
+- GRANTS: any USDA programs, government grants, or external funding received or applied for
+- GENERATION: which generation of the family owns or operates this farm
+- FARM_TYPE: the type of agricultural operation (crops, livestock, specialty, organic, mixed, etc.)
+
+Be brief. Use format "FIELD: value" for each mention. If nothing relevant appears, return "nothing notable."
+
+Passage {i}/{n}:
+{text}"""
+
+_EXTRACT_REDUCE_PROMPT = """\
+You are synthesizing field extraction notes from an ethnographic farm interview transcript.
+Consolidate the notes below into this JSON schema. Use null for fields with no evidence.
+Keep values concise (under 20 words). Return ONLY valid JSON, no explanation or prose.
+
+Schema:
+{{
+  "acreage": <string or null>,
+  "grant_status": <string or null>,
+  "generational_status": <string or null>,
+  "farm_type": <string or null>,
+  "notes": <string>
+}}
+
+Extraction notes:
+{notes}"""
+
+
+def _parse_extraction_json(text: str) -> dict:
+    blank = {"acreage": None, "grant_status": None, "generational_status": None, "farm_type": None, "notes": ""}
+    try:
+        data = json.loads(text.strip())
+        blank.update(data)
+        return blank
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        try:
+            data = json.loads(match.group())
+            blank.update(data)
+            return blank
+        except json.JSONDecodeError:
+            pass
+    blank["notes"] = text.strip()
+    return blank
+
+
+@app.get("/documents/{filename}/extraction")
+async def get_extraction(filename: str):
+    stem = Path(filename).stem
+    extract_path = EXTRACTIONS_DIR / f"{stem}.json"
+    if extract_path.exists():
+        return {"data": json.loads(extract_path.read_text(encoding="utf-8")), "cached": True}
+    raise HTTPException(status_code=404, detail="No extraction cached")
+
+
+@app.post("/documents/{filename}/extract")
+async def create_extraction(
+    filename: str,
+    model: str = Form(default=DEFAULT_MODEL),
+    regenerate: bool = Query(default=False),
+):
+    pdf_path = rag.DATA_DIR / filename
+    if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    stem = Path(filename).stem
+    extract_path = EXTRACTIONS_DIR / f"{stem}.json"
+
+    async def generate():
+        if extract_path.exists() and not regenerate:
+            yield json.dumps({"stage": "cached", "data": json.loads(extract_path.read_text(encoding="utf-8"))}) + "\n"
+            return
+
+        chunks = await rag.get_chunks_for_document(filename)
+        if not chunks:
+            def _read_pdf():
+                doc = fitz.open(str(pdf_path))
+                return "".join(page.get_text() for page in doc)
+            text = await asyncio.to_thread(_read_pdf)
+            chunks = [c.strip() for c in rag._chunk(text) if c.strip()]
+
+        batches = [chunks[i:i + _MAP_BATCH_SIZE] for i in range(0, len(chunks), _MAP_BATCH_SIZE)]
+        n = len(batches)
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _run_map(client: httpx.AsyncClient, idx: int, batch: list[str]) -> None:
+            prompt = _EXTRACT_MAP_PROMPT.format(i=idx + 1, n=n, text="\n".join(batch))
+            try:
+                resp = await client.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE},
+                )
+                resp.raise_for_status()
+                out = resp.json().get("response", "").strip()
+            except Exception as e:
+                logger.warning("Extract map %d/%d failed for %s: %r", idx + 1, n, filename, e)
+                out = "nothing notable."
+            await queue.put((idx, out))
+
+        map_results: list[str] = ["nothing notable."] * n
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            tasks = [asyncio.create_task(_run_map(client, i, batch)) for i, batch in enumerate(batches)]
+            for done in range(1, n + 1):
+                idx, out = await queue.get()
+                map_results[idx] = out
+                yield json.dumps({"stage": "map", "batch": done, "total": n}) + "\n"
+            await asyncio.gather(*tasks)
+
+        map_outputs = [
+            f"[Batch {i + 1}/{n}]\n{out}"
+            for i, out in enumerate(map_results)
+            if out and out.lower() != "nothing notable."
+        ]
+        notes = "\n\n".join(map_outputs) if map_outputs else "No relevant field data found."
+
+        yield json.dumps({"stage": "reduce"}) + "\n"
+
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                resp = await client.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": _EXTRACT_REDUCE_PROMPT.format(notes=notes), "stream": False, "keep_alive": KEEP_ALIVE},
+                )
+                resp.raise_for_status()
+                raw = resp.json().get("response", "").strip()
+        except Exception as e:
+            logger.error("Extract reduce failed for %s: %r", filename, e)
+            yield json.dumps({"error": repr(e)}) + "\n"
+            return
+
+        data = _parse_extraction_json(raw)
+        EXTRACTIONS_DIR.mkdir(parents=True, exist_ok=True)
+        extract_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        yield json.dumps({"stage": "done", "data": data}) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
 
 
 @app.post("/documents/{filename}/summary")
