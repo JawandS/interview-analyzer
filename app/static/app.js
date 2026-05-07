@@ -419,5 +419,87 @@ form.addEventListener('submit', async e => {
   }
 });
 
+// ── Documents (RAG context) ──────────────────────────────────
+const docList = document.getElementById('docList');
+const ingestingSet = new Set();
+let docPollTimer = null;
+
+async function loadDocuments() {
+  let docs;
+  try {
+    const resp = await fetch('/documents');
+    docs = await resp.json();
+  } catch {
+    return;
+  }
+  renderDocList(docs);
+
+  const stillIngesting = docs.some(d => d.ingesting || ingestingSet.has(d.name) && !d.ingested);
+  if (stillIngesting) {
+    clearTimeout(docPollTimer);
+    docPollTimer = setTimeout(loadDocuments, 2500);
+  }
+  docs.filter(d => d.ingested).forEach(d => ingestingSet.delete(d.name));
+}
+
+function renderDocList(docs) {
+  if (!docs.length) {
+    docList.innerHTML = '<span class="doc-empty">No PDFs in data/</span>';
+    return;
+  }
+
+  const prev = {};
+  docList.querySelectorAll('.doc-item[data-name]').forEach(el => {
+    prev[el.dataset.name] = el.classList.contains('ingested');
+  });
+
+  docList.innerHTML = '';
+  docs.forEach(doc => {
+    const isIngesting = doc.ingesting || ingestingSet.has(doc.name);
+    const justFinished = !isIngesting && doc.ingested && prev[doc.name] === false;
+
+    const item = document.createElement('div');
+    item.className = 'doc-item' +
+      (isIngesting ? ' ingesting' : '') +
+      (doc.ingested ? ' ingested' + (justFinished ? ' flash' : '') : '');
+    item.dataset.name = doc.name;
+
+    const name = document.createElement('span');
+    name.className = 'doc-name';
+    name.title = doc.name;
+    name.textContent = doc.name.replace(/\.pdf$/i, '');
+    item.appendChild(name);
+
+    if (doc.ingested && !isIngesting) {
+      const check = document.createElement('span');
+      check.className = 'doc-check';
+      check.textContent = '✓';
+      item.appendChild(check);
+    } else {
+      const btn = document.createElement('button');
+      btn.className = 'doc-ingest-btn';
+      btn.textContent = isIngesting ? '···' : 'Ingest';
+      btn.disabled = isIngesting;
+      if (!isIngesting) btn.addEventListener('click', () => ingestDocument(doc.name));
+      item.appendChild(btn);
+    }
+
+    docList.appendChild(item);
+  });
+}
+
+async function ingestDocument(filename) {
+  ingestingSet.add(filename);
+  renderDocList(await fetch('/documents').then(r => r.json()));
+
+  const fd = new FormData();
+  fd.append('filename', filename);
+  fetch('/ingest', { method: 'POST', body: fd });
+
+  clearTimeout(docPollTimer);
+  docPollTimer = setTimeout(loadDocuments, 2500);
+}
+
 // ── Init ─────────────────────────────────────────────────────
 loadSessions();
+loadDocuments();

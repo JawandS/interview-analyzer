@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -79,7 +79,6 @@ async def lifespan(_: FastAPI):
     logging.basicConfig(level=logging.INFO)
     await _init_db()
     asyncio.create_task(_warmup())
-    asyncio.create_task(rag.ingest(OLLAMA_BASE))
     yield
 
 
@@ -183,10 +182,32 @@ async def update_session_title(session_id: int, title: str = Form(...)):
 
 # ── RAG ───────────────────────────────────────────────────────
 
+_ingesting_files: set[str] = set()
+
+
+@app.get("/documents")
+async def list_documents():
+    docs = await rag.list_documents()
+    for d in docs:
+        d["ingesting"] = d["name"] in _ingesting_files
+    return docs
+
+
+async def _do_ingest(filename: str):
+    try:
+        result = await rag.ingest_file(filename, OLLAMA_BASE)
+        logger.info("Ingest complete for %s: %s", filename, result)
+    finally:
+        _ingesting_files.discard(filename)
+
+
 @app.post("/ingest")
-async def trigger_ingest():
-    await rag.ingest(OLLAMA_BASE)
-    return {"ok": True}
+async def trigger_ingest(background_tasks: BackgroundTasks, filename: str = Form(...)):
+    if filename in _ingesting_files:
+        return {"status": "ingesting"}
+    _ingesting_files.add(filename)
+    background_tasks.add_task(_do_ingest, filename)
+    return {"status": "started"}
 
 
 # ── Chat ──────────────────────────────────────────────────────

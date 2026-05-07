@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(wsl *)",
-      "PowerShell(curl.exe -s http://localhost:11434/api/tags)"
+      "PowerShell(curl.exe -s http://localhost:11434/api/tags)",
+      "PowerShell(curl.exe -v -X POST http://localhost:11434/api/embed -H \"Content-Type: application/json\" -d \"{\\\\\"model\\\\\": \\\\\"mxbai-embed-large\\\\\", \\\\\"input\\\\\": \\\\\"test\\\\\"}\" 2>&1)",
+      "PowerShell($body = '{\"model\": \"mxbai-embed-large\", \"input\": \"test\"}'; curl.exe -s -X POST http://localhost:11434/api/embed -H \"Content-Type: application/json\" -d $body)",
+      "PowerShell(Invoke-RestMethod -Method Post -Uri http://localhost:11434/api/embed -ContentType \"application/json\" -Body '{\"model\": \"mxbai-embed-large\", \"input\": \"test\"}' | ConvertTo-Json -Depth 3 | Select-Object -First 5)"
     ]
   }
 }

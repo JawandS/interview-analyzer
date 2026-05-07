@@ -26,7 +26,7 @@ def _chunk(text: str) -> list[str]:
 
 
 async def _embed(text: str, ollama_base: str) -> list[float]:
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
             f"{ollama_base}/api/embed",
             json={"model": EMBED_MODEL, "input": text},
@@ -35,46 +35,68 @@ async def _embed(text: str, ollama_base: str) -> list[float]:
         return resp.json()["embeddings"][0]
 
 
-async def ingest(ollama_base: str) -> None:
-    pdfs = list(DATA_DIR.glob("*.pdf"))
+async def list_documents() -> list[dict]:
+    pdfs = sorted(DATA_DIR.glob("*.pdf"), key=lambda p: p.name.lower())
     if not pdfs:
-        logger.info("RAG: no PDFs found in %s", DATA_DIR)
-        return
+        return []
+
+    names = [p.name for p in pdfs]
+
+    def _check():
+        CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+        client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+        col = client.get_or_create_collection(COLLECTION)
+        result = {}
+        for name in names:
+            hits = col.get(ids=[f"{name}::0"])
+            result[name] = len(hits["ids"]) > 0
+        return result
+
+    try:
+        status = await asyncio.to_thread(_check)
+    except Exception:
+        status = {n: False for n in names}
+
+    return [{"name": n, "ingested": status.get(n, False)} for n in names]
+
+
+async def ingest_file(filename: str, ollama_base: str) -> dict:
+    pdf_path = DATA_DIR / filename
+    if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
+        return {"ok": False, "error": "File not found"}
 
     def _get_collection():
+        CHROMA_DIR.mkdir(parents=True, exist_ok=True)
         client = chromadb.PersistentClient(path=str(CHROMA_DIR))
         return client.get_or_create_collection(COLLECTION)
 
     collection = await asyncio.to_thread(_get_collection)
 
-    total = 0
-    for pdf_path in pdfs:
-        doc = await asyncio.to_thread(fitz.open, str(pdf_path))
-        text = "".join(page.get_text() for page in doc)
-        chunks = _chunk(text)
+    doc = await asyncio.to_thread(fitz.open, str(pdf_path))
+    text = "".join(page.get_text() for page in doc)
+    chunks = _chunk(text)
 
-        ids, embeddings, documents = [], [], []
-        for i, chunk in enumerate(chunks):
-            chunk = chunk.strip()
-            if not chunk:
-                continue
-            try:
-                vec = await _embed(chunk, ollama_base)
-            except Exception as e:
-                logger.warning("RAG: embedding failed for %s chunk %d: %s", pdf_path.name, i, e)
-                return
-            ids.append(f"{pdf_path.name}::{i}")
-            embeddings.append(vec)
-            documents.append(chunk)
+    ids, embeddings, documents = [], [], []
+    for i, chunk in enumerate(chunks):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            vec = await _embed(chunk, ollama_base)
+        except Exception as e:
+            logger.warning("RAG: embed failed for %s chunk %d: %s", filename, i, e)
+            return {"ok": False, "error": str(e)}
+        ids.append(f"{filename}::{i}")
+        embeddings.append(vec)
+        documents.append(chunk)
 
-        if ids:
-            await asyncio.to_thread(
-                collection.upsert, ids=ids, embeddings=embeddings, documents=documents
-            )
-            total += len(ids)
-            logger.info("RAG: upserted %d chunks from %s", len(ids), pdf_path.name)
+    if ids:
+        await asyncio.to_thread(
+            collection.upsert, ids=ids, embeddings=embeddings, documents=documents
+        )
+        logger.info("RAG: upserted %d chunks from %s", len(ids), filename)
 
-    logger.info("RAG: ingest complete — %d total chunks in collection", total)
+    return {"ok": True, "chunks": len(ids)}
 
 
 async def retrieve(query: str, ollama_base: str, n: int = 5) -> list[str]:
@@ -85,6 +107,7 @@ async def retrieve(query: str, ollama_base: str, n: int = 5) -> list[str]:
         return []
 
     def _query():
+        CHROMA_DIR.mkdir(parents=True, exist_ok=True)
         client = chromadb.PersistentClient(path=str(CHROMA_DIR))
         col = client.get_or_create_collection(COLLECTION)
         if col.count() == 0:
