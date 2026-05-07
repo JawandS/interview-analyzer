@@ -1024,7 +1024,7 @@ async def chat(
         system_prompt = (
             "You are analyzing an ethnographic interview corpus. "
             "Use the following excerpts to inform your response. "
-            "Whenever you draw on an excerpt, cite it using the format (Source: filename).\n\n"
+            "Whenever you draw on an excerpt, cite it using the format (Source: filename, excerpt chunk_index).\n\n"
             + "\n\n---\n\n".join(excerpt_lines)
         )
     else:
