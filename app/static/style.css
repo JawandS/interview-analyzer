@@ -166,8 +166,9 @@ body {
   transition: color 0.35s;
 }
 
+.session-rename,
 .session-delete {
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: 18px;
@@ -184,11 +185,30 @@ body {
   transition: color 0.15s, background 0.15s;
 }
 
-.session-item:hover .session-delete { display: flex; }
+
+.session-rename { font-size: 0.72rem; }
+
+.session-rename:hover {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
 
 .session-delete:hover {
   color: #c0504a;
   background: rgba(192, 80, 74, 0.12);
+}
+
+.session-rename-input {
+  font-family: "Consolas", "Menlo", "Courier New", monospace;
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0 3px;
+  width: 100%;
+  outline: none;
 }
 
 /* ── Main column ──────────────────────────────── */
