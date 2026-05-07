@@ -1,0 +1,33 @@
+/* ── Theme tokens ─────────────────────────────── */
+:root {
+  --bg:            #faf7f2;
+  --surface:       rgba(240, 235, 226, 0.75);
+  --surface-solid: #f0ebe2;
+  --border:        rgba(184, 114, 42, 0.18);
+  --border-hard:   #d4c9b8;
+  --accent:        #b8722a;
+  --accent-dim:    rgba(184, 114, 42, 0.09);
+  --text:          #2a2018;
+  --muted:         #8a7a66;
+  --grid:          rgba(184, 114, 42, 0.07);
+  --glow:          rgba(184, 114, 42, 0.15);
+  --shadow:        rgba(42, 32, 24, 0.14);
+  --think-bg:      rgba(184, 114, 42, 0.055);
+  --think-border:  rgba(184, 114, 42, 0.18);
+}
+[data-theme="dark"] {
+  --bg:            #12100e;
+  --surface:       rgba(28, 25, 22, 0.72);
+  --surface-solid: #1c1916;
+  --border:        rgba(212, 145, 74, 0.14);
+  --border-hard:   #2e2a26;
+  --accent:        #d4914a;
+  --accent-dim:    rgba(212, 145, 74, 0.11);
+  --text:          #e8e2d8;
+  --muted:         #7a6f64;
+  --grid:          rgba(212, 145, 74, 0.055);
+  --glow:          rgba(212, 145, 74, 0.18);
+  --shadow:        rgba(0, 0, 0, 0.45);
+  --think-bg:      rgba(212, 145, 74, 0.055);
+  --think-border:  rgba(212, 145, 74, 0.18);
+}

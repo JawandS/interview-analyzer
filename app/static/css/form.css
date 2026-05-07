@@ -1,0 +1,76 @@
+/* ── Form ─────────────────────────────────────── */
+.form-shell {
+  flex-shrink: 0;
+  padding: 0.85rem 1.4rem 1.1rem;
+  border-top: 1px solid var(--border-hard);
+  background: var(--surface);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  transition: background 0.35s, border-color 0.35s;
+  position: relative;
+  z-index: 10;
+}
+
+.form-row {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-end;
+}
+
+form { display: contents; }
+
+textarea {
+  flex: 1;
+  background: var(--accent-dim);
+  border: 1px solid var(--border-hard);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: Georgia, "Constantia", "Palatino Linotype", serif;
+  font-size: 0.94rem;
+  line-height: 1.5;
+  padding: 0.65rem 0.9rem;
+  resize: none;
+  min-height: 44px;
+  max-height: 180px;
+  outline: none;
+  transition: border-color 0.2s, background 0.35s, box-shadow 0.2s;
+}
+
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.55;
+  font-style: italic;
+}
+
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim), 0 0 8px var(--glow);
+}
+
+button[type="submit"] {
+  height: 44px;
+  padding: 0 1.15rem;
+  flex-shrink: 0;
+  background: var(--accent);
+  border: none;
+  border-radius: 4px;
+  color: var(--bg);
+  font-family: "Consolas", "Menlo", "Courier New", monospace;
+  font-size: 0.63rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 0 10px var(--glow);
+  transition: opacity 0.15s, box-shadow 0.2s, background 0.35s, color 0.35s;
+}
+
+button[type="submit"]:hover { opacity: 0.85; box-shadow: 0 0 18px var(--glow); }
+
+body[data-streaming] button[type="submit"] {
+  opacity: 0.3;
+  cursor: not-allowed;
+  pointer-events: none;
+  box-shadow: none;
+}

@@ -266,6 +266,15 @@ function renderSessionList(sessions) {
     info.appendChild(title);
     info.appendChild(date);
 
+    const ren = document.createElement('button');
+    ren.className = 'session-rename';
+    ren.title     = 'Rename';
+    ren.innerHTML = '&#9998;';
+    ren.addEventListener('click', e => {
+      e.stopPropagation();
+      startRename(item, title, s.id);
+    });
+
     const del = document.createElement('button');
     del.className   = 'session-delete';
     del.title       = 'Delete';
@@ -278,10 +287,37 @@ function renderSessionList(sessions) {
     });
 
     item.appendChild(info);
+    item.appendChild(ren);
     item.appendChild(del);
     item.addEventListener('click', () => loadSession(s.id));
     list.appendChild(item);
   });
+}
+
+function startRename(item, titleEl, sessionId) {
+  const current = titleEl.textContent;
+  const input = document.createElement('input');
+  input.className = 'session-rename-input';
+  input.value = current;
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  async function commit() {
+    const newTitle = input.value.trim() || current;
+    if (newTitle !== current) {
+      const fd = new FormData();
+      fd.append('title', newTitle);
+      await fetch(`/sessions/${sessionId}/title`, { method: 'PATCH', body: fd });
+    }
+    await loadSessions();
+  }
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { input.replaceWith(titleEl); }
+  });
+  input.addEventListener('blur', commit);
 }
 
 async function loadSession(id) {

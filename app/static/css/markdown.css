@@ -1,0 +1,88 @@
+/* ── Markdown in assistant bubbles ────────────── */
+.bubble p { margin-bottom: 0.65em; }
+.bubble p:last-child { margin-bottom: 0; }
+
+.bubble h1, .bubble h2, .bubble h3,
+.bubble h4, .bubble h5, .bubble h6 {
+  font-family: Georgia, "Constantia", "Palatino Linotype", serif;
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 0.9em 0 0.3em;
+  color: var(--text);
+}
+.bubble h1 { font-size: 1.18em; }
+.bubble h2 { font-size: 1.06em; }
+.bubble h3 { font-size: 0.97em; letter-spacing: 0.01em; }
+.bubble h1:first-child,
+.bubble h2:first-child,
+.bubble h3:first-child { margin-top: 0; }
+
+.bubble ul, .bubble ol {
+  padding-left: 1.4em;
+  margin-bottom: 0.65em;
+}
+.bubble li { margin-bottom: 0.2em; }
+.bubble li > ul, .bubble li > ol { margin-bottom: 0; margin-top: 0.18em; }
+
+.bubble code {
+  font-family: "Consolas", "Menlo", "Courier New", monospace;
+  font-size: 0.83em;
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border-hard);
+  padding: 0.1em 0.34em;
+  border-radius: 3px;
+}
+[data-theme="dark"] .bubble code { background: rgba(0, 0, 0, 0.22); }
+
+.bubble pre {
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--border-hard);
+  border-radius: 5px;
+  padding: 0.75em 0.9em;
+  margin-bottom: 0.65em;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-hard) transparent;
+}
+[data-theme="dark"] .bubble pre { background: rgba(0, 0, 0, 0.28); }
+
+.bubble pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.82em;
+  line-height: 1.55;
+}
+
+.bubble blockquote {
+  border-left: 2px solid var(--accent);
+  margin: 0.4em 0 0.65em;
+  padding: 0.15em 0 0.15em 0.85em;
+  color: var(--muted);
+}
+.bubble blockquote p:last-child { margin-bottom: 0; }
+
+.bubble hr {
+  border: none;
+  border-top: 1px solid var(--border-hard);
+  margin: 0.75em 0;
+}
+
+.bubble a { color: var(--accent); text-underline-offset: 2px; }
+.bubble a:hover { opacity: 0.78; }
+
+.bubble table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 0.65em;
+  font-size: 0.88em;
+}
+.bubble th, .bubble td {
+  border: 1px solid var(--border-hard);
+  padding: 0.32em 0.65em;
+  text-align: left;
+}
+.bubble th {
+  background: var(--accent-dim);
+  font-weight: 600;
+}

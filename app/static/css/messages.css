@@ -1,0 +1,87 @@
+/* ── Messages ─────────────────────────────────── */
+#messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem 0 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-hard) transparent;
+}
+
+#messages::-webkit-scrollbar { width: 3px; }
+#messages::-webkit-scrollbar-thumb { background: var(--border-hard); border-radius: 2px; }
+
+.message {
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  animation: msgIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.message.user      { align-items: flex-end; }
+.message.assistant { align-items: flex-start; }
+
+.label {
+  font-family: "Consolas", "Menlo", "Courier New", monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 3px;
+}
+
+/* ── Bubble ───────────────────────────────────── */
+.bubble {
+  max-width: min(600px, 86%);
+  padding: 0.8rem 1rem;
+  line-height: 1.78;
+  font-size: 0.94rem;
+  background: var(--surface);
+  backdrop-filter: blur(12px) saturate(1.3);
+  -webkit-backdrop-filter: blur(12px) saturate(1.3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 16px var(--shadow);
+  transition: background 0.35s, border-color 0.35s;
+  word-break: break-word;
+}
+
+.message.user .bubble { white-space: pre-wrap; }
+
+.message.user .bubble {
+  border-bottom-right-radius: 0;
+}
+
+.message.assistant .bubble {
+  border-left: 2px solid var(--accent);
+  border-bottom-left-radius: 0;
+  box-shadow: 0 2px 16px var(--shadow), 0 0 0 1px var(--accent-dim);
+}
+
+.bubble.streaming::after {
+  content: '▋';
+  display: inline;
+  color: var(--accent);
+  animation: blink-cursor 0.75s steps(1) infinite;
+  margin-left: 1px;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* ── KaTeX in bubbles ─────────────────────────── */
+.bubble .katex { font-size: 1.05em; }
+.bubble .katex-display { margin: 0.6em 0; overflow-x: auto; }
