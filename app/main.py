@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -250,6 +250,15 @@ async def _do_ingest(filename: str):
         _ingesting_files.discard(filename)
 
 
+@app.post("/documents/upload")
+async def upload_document(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+    dest = rag.DATA_DIR / file.filename
+    dest.write_bytes(await file.read())
+    return {"name": file.filename}
+
+
 @app.post("/ingest")
 async def trigger_ingest(background_tasks: BackgroundTasks, filename: str = Form(...)):
     if filename in _ingesting_files:
@@ -323,57 +332,61 @@ async def create_summary(
     stem = Path(filename).stem
     summary_path = SUMMARIES_DIR / f"{stem}.md"
 
-    if summary_path.exists() and not regenerate:
-        return {"summary": summary_path.read_text(encoding="utf-8"), "cached": True}
+    async def generate():
+        if summary_path.exists() and not regenerate:
+            yield json.dumps({"stage": "cached", "summary": summary_path.read_text(encoding="utf-8")}) + "\n"
+            return
 
-    # Use ingested chunks; fall back to reading the PDF directly
-    chunks = await rag.get_chunks_for_document(filename)
-    if not chunks:
-        def _read_pdf():
-            doc = fitz.open(str(pdf_path))
-            return "".join(page.get_text() for page in doc)
-        text = await asyncio.to_thread(_read_pdf)
-        chunks = [c.strip() for c in rag._chunk(text) if c.strip()]
+        chunks = await rag.get_chunks_for_document(filename)
+        if not chunks:
+            def _read_pdf():
+                doc = fitz.open(str(pdf_path))
+                return "".join(page.get_text() for page in doc)
+            text = await asyncio.to_thread(_read_pdf)
+            chunks = [c.strip() for c in rag._chunk(text) if c.strip()]
 
-    batches = [chunks[i:i + _MAP_BATCH_SIZE] for i in range(0, len(chunks), _MAP_BATCH_SIZE)]
-    n = len(batches)
-    map_outputs: list[str] = []
+        batches = [chunks[i:i + _MAP_BATCH_SIZE] for i in range(0, len(chunks), _MAP_BATCH_SIZE)]
+        n = len(batches)
+        map_outputs: list[str] = []
 
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        for i, batch in enumerate(batches):
-            prompt = _MAP_PROMPT.format(i=i + 1, n=n, filename=filename, text="\n".join(batch))
-            try:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            for i, batch in enumerate(batches):
+                prompt = _MAP_PROMPT.format(i=i + 1, n=n, filename=filename, text="\n".join(batch))
+                try:
+                    resp = await client.post(
+                        f"{OLLAMA_BASE}/api/generate",
+                        json={"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE},
+                    )
+                    resp.raise_for_status()
+                    out = resp.json().get("response", "").strip()
+                except Exception as e:
+                    logger.warning("Summary map step %d/%d failed for %s: %s", i + 1, n, filename, e)
+                    out = "nothing notable."
+                if out and out.lower() != "nothing notable.":
+                    map_outputs.append(f"[Batch {i + 1}/{n}]\n{out}")
+                yield json.dumps({"stage": "map", "batch": i + 1, "total": n}) + "\n"
+
+        notes = "\n\n".join(map_outputs) if map_outputs else "No notable content extracted."
+        yield json.dumps({"stage": "reduce"}) + "\n"
+
+        try:
+            async with httpx.AsyncClient(timeout=300.0) as client:
                 resp = await client.post(
                     f"{OLLAMA_BASE}/api/generate",
-                    json={"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE},
+                    json={"model": model, "prompt": _REDUCE_PROMPT.format(notes=notes), "stream": False, "keep_alive": KEEP_ALIVE},
                 )
                 resp.raise_for_status()
-                out = resp.json().get("response", "").strip()
-            except Exception as e:
-                logger.warning("Summary map step %d/%d failed for %s: %s", i + 1, n, filename, e)
-                out = "nothing notable."
-            if out and out.lower() != "nothing notable.":
-                map_outputs.append(f"[Batch {i + 1}/{n}]\n{out}")
+                summary_text = resp.json().get("response", "")
+        except Exception as e:
+            logger.error("Summary reduce step failed for %s: %s", filename, e)
+            yield json.dumps({"error": str(e)}) + "\n"
+            return
 
-    notes = "\n\n".join(map_outputs) if map_outputs else "No notable content extracted."
-    reduce_prompt = _REDUCE_PROMPT.format(notes=notes)
+        SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(summary_text, encoding="utf-8")
+        yield json.dumps({"stage": "done", "summary": summary_text}) + "\n"
 
-    try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            resp = await client.post(
-                f"{OLLAMA_BASE}/api/generate",
-                json={"model": model, "prompt": reduce_prompt, "stream": False, "keep_alive": KEEP_ALIVE},
-            )
-            resp.raise_for_status()
-            summary_text = resp.json().get("response", "")
-    except Exception as e:
-        logger.error("Summary reduce step failed for %s: %s", filename, e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-    SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(summary_text, encoding="utf-8")
-
-    return {"summary": summary_text, "cached": False}
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
 
 
 # ── Chat ──────────────────────────────────────────────────────

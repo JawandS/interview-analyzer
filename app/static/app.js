@@ -703,8 +703,33 @@ async function summarizeDocument(filename, btn) {
       body: fd,
     });
     if (!resp.ok) throw new Error(`Server error ${resp.status}`);
-    const data = await resp.json();
-    showModalContent(data.summary);
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.error) {
+            showModalContent(`**Error:** ${msg.error}`);
+          } else if (msg.stage === 'cached' || msg.stage === 'done') {
+            showModalContent(msg.summary);
+          } else if (msg.stage === 'map') {
+            updateSummaryProgress(`Reading passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total);
+          } else if (msg.stage === 'reduce') {
+            updateSummaryProgress('Synthesizing…', 1);
+          }
+        } catch { /* partial line — wait for next chunk */ }
+      }
+    }
   } catch (err) {
     showModalContent(`**Error generating summary:** ${err.message}`);
   } finally {
@@ -712,6 +737,34 @@ async function summarizeDocument(filename, btn) {
     btn.textContent = 'Summary';
   }
 }
+
+// ── Document upload ──────────────────────────────────────────
+const docUploadBtn   = document.getElementById('docUploadBtn');
+const docFileInput   = document.getElementById('docFileInput');
+
+docUploadBtn.addEventListener('click', () => docFileInput.click());
+
+docFileInput.addEventListener('change', async () => {
+  const file = docFileInput.files[0];
+  if (!file) return;
+  docFileInput.value = '';
+  docUploadBtn.disabled = true;
+  docUploadBtn.textContent = '···';
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const resp = await fetch('/documents/upload', { method: 'POST', body: fd });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert(err.detail || 'Upload failed');
+    } else {
+      await loadDocuments();
+    }
+  } finally {
+    docUploadBtn.disabled = false;
+    docUploadBtn.textContent = '+';
+  }
+});
 
 // ── Summary modal ────────────────────────────────────────────
 const modalOverlay = document.getElementById('summaryModal');
@@ -722,9 +775,21 @@ const modalClose   = document.getElementById('modalClose');
 function openModal(title, content) {
   modalTitle.textContent = title;
   modalBody.innerHTML = content === null
-    ? '<span class="modal-loading">Generating summary…</span>'
+    ? `<div class="summary-progress">
+         <span class="summary-progress-label" id="summaryProgressLabel">Starting…</span>
+         <div class="summary-progress-track">
+           <div class="summary-progress-fill" id="summaryProgressFill"></div>
+         </div>
+       </div>`
     : renderContent(content);
   modalOverlay.classList.add('open');
+}
+
+function updateSummaryProgress(label, fraction) {
+  const lbl  = document.getElementById('summaryProgressLabel');
+  const fill = document.getElementById('summaryProgressFill');
+  if (lbl)  lbl.textContent     = label;
+  if (fill) fill.style.width    = `${Math.round(fraction * 100)}%`;
 }
 
 function showModalContent(content) {

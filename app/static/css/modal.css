@@ -112,6 +112,35 @@
   animation: pulse 1.2s steps(1) infinite;
 }
 
+.summary-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.4rem 0;
+}
+
+.summary-progress-label {
+  font-family: "Consolas", "Menlo", "Courier New", monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+
+.summary-progress-track {
+  height: 3px;
+  background: var(--border-hard);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.summary-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
 /* ── Confirm dialogs ─────────────────────────────────────────── */
 .confirm-panel {
   width: min(420px, 92vw);
