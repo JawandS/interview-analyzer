@@ -291,13 +291,24 @@ async def pdf_page_for_chunk(filename: str, chunk: int = Query(...)):
         offset = chunk * rag.CHUNK_STEP
         doc = fitz.open(str(path))
         running = 0
+        page_num = doc.page_count
         for i, page in enumerate(doc):
             running += len(page.get_text())
             if running > offset:
-                return JSONResponse({"page": i + 1})
-        return JSONResponse({"page": doc.page_count})
+                page_num = i + 1
+                break
+
+        def _get_text():
+            import chromadb
+            client = chromadb.PersistentClient(path=str(rag.CHROMA_DIR))
+            col = client.get_or_create_collection("interviews")
+            results = col.get(ids=[f"{filename}::{chunk}"], include=["documents"])
+            return results["documents"][0] if results["documents"] else None
+
+        text = await asyncio.to_thread(_get_text)
+        return JSONResponse({"page": page_num, "text": text})
     except Exception:
-        return JSONResponse({"page": 1})
+        return JSONResponse({"page": 1, "text": None})
 
 
 # ── Document summaries ───────────────────────────────────────
