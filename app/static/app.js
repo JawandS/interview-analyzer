@@ -31,6 +31,14 @@ function renderContent(text) {
   return html;
 }
 
+function linkifyCitations(html) {
+  return html.replace(
+    /\(Source:\s*([\w.\- ]+?),\s*excerpt\s*(\d+)\)/g,
+    (_, file, chunk) =>
+      `<a class="citation-link" data-file="${file.trim()}" data-chunk="${chunk}" href="#">(Source: ${file.trim()}, excerpt ${chunk})</a>`
+  );
+}
+
 // ── Textarea resize ──────────────────────────────────────────
 export function resize(el) {
   el.style.height = 'auto';
@@ -50,7 +58,7 @@ function setTheme(t) {
 themeBtn.addEventListener('click', () =>
   setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark')
 );
-setTheme(localStorage.getItem('theme') || 'dark');
+setTheme(localStorage.getItem('theme') || 'light');
 
 // ── Sidebar toggle ───────────────────────────────────────────
 const sidebar    = document.getElementById('sidebar');
@@ -378,7 +386,7 @@ async function loadSession(id) {
         t.label.classList.remove('active');
         t.details.open      = false;
       }
-      bubble.innerHTML = renderContent(m.content);
+      bubble.innerHTML = linkifyCitations(renderContent(m.content));
       bubble.classList.remove('streaming');
       msgs.appendChild(wrap);
     }
@@ -567,7 +575,7 @@ form.addEventListener('submit', async e => {
     activeReader = null;
     clearTimeout(loadingHint);
 
-    if (responseText) bubble.innerHTML = renderContent(responseText);
+    if (responseText) bubble.innerHTML = linkifyCitations(renderContent(responseText));
     if (think && thinkText) {
       think.body.innerHTML = renderContent(thinkText);
       think.body.classList.add('rendered');
@@ -599,6 +607,22 @@ document.getElementById('streamInterruptConfirm').addEventListener('click', () =
   activeReader?.cancel();
 });
 
+// ── Citation click handler ───────────────────────────────────
+document.getElementById('messages').addEventListener('click', async (e) => {
+  const a = e.target.closest('.citation-link');
+  if (!a) return;
+  e.preventDefault();
+  const file  = a.dataset.file;
+  const chunk = a.dataset.chunk;
+  try {
+    const res  = await fetch(`/pdf/${encodeURIComponent(file)}/page?chunk=${chunk}`);
+    const data = await res.json();
+    window.open(`/static/data/${encodeURIComponent(file)}#page=${data.page}`, '_blank');
+  } catch {
+    window.open(`/static/data/${encodeURIComponent(file)}`, '_blank');
+  }
+});
+
 // ── Documents (RAG context) ──────────────────────────────────
 const docList = document.getElementById('docList');
 const ingestingSet = new Set();
@@ -612,6 +636,7 @@ async function loadDocuments() {
   } catch {
     return;
   }
+  docs.filter(d => d.ingested).forEach(d => ingestingSet.delete(d.name));
   renderDocList(docs);
 
   const stillIngesting = docs.some(d => d.ingesting || ingestingSet.has(d.name) && !d.ingested);
@@ -619,7 +644,6 @@ async function loadDocuments() {
     clearTimeout(docPollTimer);
     docPollTimer = setTimeout(loadDocuments, 2500);
   }
-  docs.filter(d => d.ingested).forEach(d => ingestingSet.delete(d.name));
 }
 
 function renderDocList(docs) {

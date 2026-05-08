@@ -6,15 +6,7 @@
 - [x] **Structured data extraction** — extract specific fields (acreage, grant status, generational status, farm type) from unstructured transcript text into clean structured output. Highest-confidence use case in the literature.
 - [x] **Per-document thematic summary** — generate a structured summary per interview capturing key topics, stances, and notable quotes. Useful for mapping the corpus before deep analysis.
 - [x] **Corpus-level pattern detection** — identify recurring themes across documents and approximate frequency. Good for a first pass; less reliable than human analysis for nuance. Per-document theme extraction (map-reduce) cached in `data/themes/` + SQLite; corpus aggregation via `GET /corpus/themes`; chat auto-routes corpus queries to theme context.
-
-## Improve RAG
-
-The current RAG has two structural problems worth fixing before relying on it for serious analysis:
-
-- **Single shared vector space, queried per-collection** — each ChromaDB collection is queried independently so chunks from different documents are never directly compared. A single cross-corpus collection (with `source` as metadata) would let the embeddings compete on equal footing.
-- **Guaranteed-slot logic breaks at scale** — with N documents, each gets `max(1, floor(5/N))` slots regardless of relevance. At 30 documents this forces 30 chunks into a top-5 result, making the cap meaningless. Replace with pure distance ranking plus a soft per-document cap (e.g. no more than 2 chunks from any single document).
-- **Sequential embedding at ingest** — chunks are embedded one at a time. Batching embed calls (Ollama supports `input` as an array) would cut ingest time significantly.
-- **No reranking** — cosine distance on `mxbai-embed-large` is the only signal. A lightweight cross-encoder rerank pass over the top-20 candidates before truncating to top-5 would improve precision.
+- [x] **Improve RAG system** 
 
 ## Not Yet Tried — Achievable with Current Setup
 

@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -9,19 +8,13 @@ import chromadb
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR    = Path(__file__).parent / "static" / "data"
-CHROMA_DIR  = Path(__file__).parent.parent / "data" / "chroma"
-EMBED_MODEL = "mxbai-embed-large"
-CHUNK_SIZE  = 500
-CHUNK_STEP  = 450
-
-
-def _collection_name(filename: str) -> str:
-    stem = Path(filename).stem
-    name = re.sub(r'[^a-zA-Z0-9_-]', '_', stem)
-    if not name or not name[0].isalpha():
-        name = 'doc_' + name
-    return name[:63]
+DATA_DIR        = Path(__file__).parent / "static" / "data"
+CHROMA_DIR      = Path(__file__).parent.parent / "data" / "chroma"
+EMBED_MODEL     = "mxbai-embed-large"
+CHUNK_SIZE      = 500
+CHUNK_STEP      = 450
+EMBED_BATCH_SIZE = 64
+PER_DOC_CAP     = 2
 
 
 def _chunk(text: str) -> list[str]:
@@ -43,6 +36,16 @@ async def _embed(text: str, ollama_base: str) -> list[float]:
         return resp.json()["embeddings"][0]
 
 
+async def _embed_batch(texts: list[str], ollama_base: str) -> list[list[float]]:
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        resp = await client.post(
+            f"{ollama_base}/api/embed",
+            json={"model": EMBED_MODEL, "input": texts},
+        )
+        resp.raise_for_status()
+        return resp.json()["embeddings"]
+
+
 async def list_documents() -> list[dict]:
     pdfs = sorted(DATA_DIR.glob("*.pdf"), key=lambda p: p.name.lower())
     if not pdfs:
@@ -53,8 +56,12 @@ async def list_documents() -> list[dict]:
     def _check():
         CHROMA_DIR.mkdir(parents=True, exist_ok=True)
         client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-        existing = {col.name for col in client.list_collections()}
-        return {name: _collection_name(name) in existing for name in names}
+        col = client.get_or_create_collection("interviews")
+        result = {}
+        for name in names:
+            r = col.get(where={"source": name}, include=[])
+            result[name] = len(r["ids"]) > 0
+        return result
 
     try:
         status = await asyncio.to_thread(_check)
@@ -69,33 +76,33 @@ async def ingest_file(filename: str, ollama_base: str) -> dict:
     if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
         return {"ok": False, "error": "File not found"}
 
-    col_name = _collection_name(filename)
-
     def _get_collection():
         CHROMA_DIR.mkdir(parents=True, exist_ok=True)
         client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-        return client.get_or_create_collection(col_name)
+        return client.get_or_create_collection("interviews")
 
     collection = await asyncio.to_thread(_get_collection)
 
     doc = await asyncio.to_thread(fitz.open, str(pdf_path))
     text = "".join(page.get_text() for page in doc)
-    chunks = _chunk(text)
+    raw_chunks = _chunk(text)
+
+    indexed_chunks = [(i, chunk.strip()) for i, chunk in enumerate(raw_chunks) if chunk.strip()]
 
     ids, embeddings, documents, metadatas = [], [], [], []
-    for i, chunk in enumerate(chunks):
-        chunk = chunk.strip()
-        if not chunk:
-            continue
+    for batch_start in range(0, len(indexed_chunks), EMBED_BATCH_SIZE):
+        batch = indexed_chunks[batch_start : batch_start + EMBED_BATCH_SIZE]
+        batch_texts = [chunk for _, chunk in batch]
         try:
-            vec = await _embed(chunk, ollama_base)
+            vecs = await _embed_batch(batch_texts, ollama_base)
         except Exception as e:
-            logger.warning("RAG: embed failed for %s chunk %d: %s", filename, i, e)
+            logger.warning("RAG: embed failed for %s batch starting at %d: %s", filename, batch_start, e)
             return {"ok": False, "error": str(e)}
-        ids.append(f"{filename}::{i}")
-        embeddings.append(vec)
-        documents.append(chunk)
-        metadatas.append({"source": filename, "chunk_index": i})
+        for (i, chunk), vec in zip(batch, vecs):
+            ids.append(f"{filename}::{i}")
+            embeddings.append(vec)
+            documents.append(chunk)
+            metadatas.append({"source": filename, "chunk_index": i})
 
     if ids:
         await asyncio.to_thread(
@@ -105,24 +112,19 @@ async def ingest_file(filename: str, ollama_base: str) -> dict:
             documents=documents,
             metadatas=metadatas,
         )
-        logger.info("RAG: upserted %d chunks from %s into collection %s", len(ids), filename, col_name)
+        logger.info("RAG: upserted %d chunks from %s into collection interviews", len(ids), filename)
 
     return {"ok": True, "chunks": len(ids)}
 
 
 async def get_chunks_for_document(filename: str) -> list[str]:
-    col_name = _collection_name(filename)
-
     def _fetch():
         CHROMA_DIR.mkdir(parents=True, exist_ok=True)
         client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-        try:
-            col = client.get_collection(col_name)
-        except Exception:
+        col = client.get_or_create_collection("interviews")
+        results = col.get(where={"source": filename}, include=["documents", "metadatas"])
+        if not results["ids"]:
             return []
-        if col.count() == 0:
-            return []
-        results = col.get(include=["documents", "metadatas"])
         pairs = list(zip(results["metadatas"], results["documents"]))
         pairs.sort(key=lambda p: p[0].get("chunk_index", 0))
         return [doc for _, doc in pairs]
@@ -144,54 +146,46 @@ async def retrieve(query: str, ollama_base: str, n: int = 5) -> list[dict]:
     def _query():
         CHROMA_DIR.mkdir(parents=True, exist_ok=True)
         client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-        collections = client.list_collections()
-
-        # Collect top-n candidates from each collection separately
-        per_col: list[list[dict]] = []
-        for col_meta in collections:
-            try:
-                col = client.get_collection(col_meta.name)
-            except Exception:
-                continue
-            if col.count() == 0:
-                continue
-            res = col.query(
-                query_embeddings=[query_vec],
-                n_results=min(n, col.count()),
-                include=["documents", "metadatas", "distances"],
-            )
-            col_results = [
-                {
-                    "text": text,
-                    "source": meta.get("source", col_meta.name),
-                    "chunk_index": meta.get("chunk_index", 0),
-                    "distance": dist,
-                }
-                for text, meta, dist in zip(
-                    res["documents"][0], res["metadatas"][0], res["distances"][0]
-                )
-            ]
-            col_results.sort(key=lambda x: x["distance"])
-            per_col.append(col_results)
-
-        if not per_col:
+        col = client.get_or_create_collection("interviews")
+        if col.count() == 0:
             return []
 
-        # Guarantee at least one chunk per collection, fill remaining slots globally
-        guaranteed = max(1, n // len(per_col))
+        top_k = min(max(20, n * 4), col.count())
+        res = col.query(
+            query_embeddings=[query_vec],
+            n_results=top_k,
+            include=["documents", "metadatas", "distances"],
+        )
+        candidates = [
+            {
+                "text": text,
+                "source": meta.get("source", ""),
+                "chunk_index": meta.get("chunk_index", 0),
+                "distance": dist,
+            }
+            for text, meta, dist in zip(
+                res["documents"][0], res["metadatas"][0], res["distances"][0]
+            )
+        ]
+        candidates.sort(key=lambda x: x["distance"])
+
         selected: list[dict] = []
-        remainder: list[dict] = []
-        for col_results in per_col:
-            selected.extend(col_results[:guaranteed])
-            remainder.extend(col_results[guaranteed:])
+        overflow: list[dict] = []
+        source_counts: dict[str, int] = {}
+        for candidate in candidates:
+            if len(selected) == n:
+                break
+            src = candidate["source"]
+            if source_counts.get(src, 0) < PER_DOC_CAP:
+                selected.append(candidate)
+                source_counts[src] = source_counts.get(src, 0) + 1
+            else:
+                overflow.append(candidate)
 
-        remaining_slots = n - len(selected)
-        if remaining_slots > 0:
-            remainder.sort(key=lambda x: x["distance"])
-            selected.extend(remainder[:remaining_slots])
+        if len(selected) < n:
+            selected.extend(overflow[: n - len(selected)])
 
-        selected.sort(key=lambda x: x["distance"])
-        return selected[:n]
+        return selected
 
     try:
         return await asyncio.to_thread(_query)

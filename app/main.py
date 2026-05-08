@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import asyncio
@@ -278,6 +278,26 @@ async def trigger_ingest(background_tasks: BackgroundTasks, filename: str = Form
     _ingesting_files.add(filename)
     background_tasks.add_task(_do_ingest, filename)
     return {"status": "started"}
+
+
+@app.get("/pdf/{filename}/page")
+async def pdf_page_for_chunk(filename: str, chunk: int = Query(...)):
+    if not filename.lower().endswith(".pdf"):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    path = rag.DATA_DIR / filename
+    if not path.exists():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    try:
+        offset = chunk * rag.CHUNK_STEP
+        doc = fitz.open(str(path))
+        running = 0
+        for i, page in enumerate(doc):
+            running += len(page.get_text())
+            if running > offset:
+                return JSONResponse({"page": i + 1})
+        return JSONResponse({"page": doc.page_count})
+    except Exception:
+        return JSONResponse({"page": 1})
 
 
 # ── Document summaries ───────────────────────────────────────
