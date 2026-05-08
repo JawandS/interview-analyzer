@@ -707,6 +707,13 @@ function renderDocList(docs) {
       themBtn.title = 'Extract themes from this document';
       themBtn.addEventListener('click', () => themeDocument(doc.name, themBtn));
       item.appendChild(themBtn);
+
+      const tensBtn = document.createElement('button');
+      tensBtn.className = 'doc-tensions-btn';
+      tensBtn.textContent = 'Tensions';
+      tensBtn.title = 'Detect internal contradictions and tensions';
+      tensBtn.addEventListener('click', () => tensionDocument(doc.name, tensBtn));
+      item.appendChild(tensBtn);
     } else {
       const btn = document.createElement('button');
       btn.className = 'doc-ingest-btn';
@@ -979,6 +986,140 @@ function showThemesList(themes) {
   modalBody.appendChild(table);
 }
 
+async function tensionDocument(filename, btn) {
+  btn.disabled = true;
+  btn.textContent = '···';
+
+  const title = filename.replace(/\.pdf$/i, '');
+
+  try {
+    const cached = await fetch(`/documents/${encodeURIComponent(filename)}/contradictions`);
+    if (cached.ok) {
+      const data = await cached.json();
+      modalTitle.textContent = 'Internal Tensions — ' + title;
+      modalBody.innerHTML = '';
+      modalOverlay.classList.add('open');
+      renderContradictions(data.contradictions, filename);
+      btn.disabled = false;
+      btn.textContent = 'Tensions';
+      return;
+    }
+  } catch { }
+
+  openModal('Internal Tensions — ' + title, null);
+
+  try {
+    const fd = new FormData();
+    if (activeModel) fd.append('model', activeModel);
+
+    const resp = await fetch(`/documents/${encodeURIComponent(filename)}/contradictions`, {
+      method: 'POST',
+      body: fd,
+    });
+    if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.error) {
+            showModalContent(`**Error:** ${msg.error}`);
+          } else if (msg.stage === 'cached' || msg.stage === 'done') {
+            renderContradictions(msg.contradictions, filename);
+          } else if (msg.stage === 'map_cached') {
+            updateSummaryProgress('Using cached passages…', 1);
+          } else if (msg.stage === 'map') {
+            updateSummaryProgress(`Scanning passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total);
+          } else if (msg.stage === 'reduce') {
+            updateSummaryProgress('Detecting contradictions…', 1);
+          }
+        } catch { }
+      }
+    }
+  } catch (err) {
+    showModalContent(`**Error detecting tensions:** ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Tensions';
+  }
+}
+
+const TYPE_LABELS = {
+  belief_vs_practice: 'Belief vs. Practice',
+  self_contradiction:  'Self-Contradiction',
+  hedging:             'Hedging',
+};
+
+const SEVERITY_STYLES = {
+  strong:   { color: '#c05050', bg: 'rgba(192, 80, 80, 0.1)',  border: 'rgba(192, 80, 80, 0.3)'  },
+  moderate: { color: '#b48246', bg: 'rgba(180, 130, 70, 0.1)', border: 'rgba(180, 130, 70, 0.3)' },
+  mild:     { color: '#888',    bg: 'rgba(136, 136, 136, 0.08)', border: 'rgba(136, 136, 136, 0.25)' },
+};
+
+function renderContradictions(findings, filename) {
+  if (!findings || !findings.length) {
+    modalBody.innerHTML = '<p style="color:var(--text-muted);padding:1rem">No internal tensions or contradictions detected.</p>';
+    return;
+  }
+
+  modalBody.innerHTML = '';
+
+  findings.forEach(f => {
+    const sev   = SEVERITY_STYLES[f.severity] || SEVERITY_STYLES.mild;
+    const label = TYPE_LABELS[f.type] || f.type;
+
+    const card = document.createElement('div');
+    card.style.cssText = `border:1px solid ${sev.border};border-radius:5px;padding:0.85rem 1rem;margin-bottom:0.85rem;background:${sev.bg}`;
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem';
+
+    const badge = document.createElement('span');
+    badge.textContent = f.severity;
+    badge.style.cssText = `font-family:"Consolas","Menlo","Courier New",monospace;font-size:0.62rem;letter-spacing:0.1em;text-transform:uppercase;color:${sev.color};background:${sev.bg};border:1px solid ${sev.border};border-radius:3px;padding:0.1rem 0.35rem;flex-shrink:0`;
+
+    const typeEl = document.createElement('span');
+    typeEl.textContent = label;
+    typeEl.style.cssText = 'font-family:"Consolas","Menlo","Courier New",monospace;font-size:0.72rem;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-secondary)';
+
+    header.appendChild(badge);
+    header.appendChild(typeEl);
+
+    const desc = document.createElement('p');
+    desc.textContent = f.description;
+    desc.style.cssText = 'margin:0 0 0.75rem;font-size:0.88rem;color:var(--text);line-height:1.6';
+
+    const qa = document.createElement('blockquote');
+    qa.textContent = `"${f.quote_a}"`;
+    qa.style.cssText = 'margin:0 0 0.35rem;font-style:italic;font-size:0.84rem;color:var(--text-secondary);border-left:2px solid var(--border-hard);padding-left:0.75rem';
+
+    const divider = document.createElement('div');
+    divider.textContent = '↕';
+    divider.style.cssText = 'text-align:center;color:var(--muted);font-size:0.8rem;margin:0.2rem 0';
+
+    const qb = document.createElement('blockquote');
+    qb.textContent = `"${f.quote_b}"`;
+    qb.style.cssText = 'margin:0;font-style:italic;font-size:0.84rem;color:var(--text-secondary);border-left:2px solid var(--border-hard);padding-left:0.75rem';
+
+    card.appendChild(header);
+    card.appendChild(desc);
+    card.appendChild(qa);
+    card.appendChild(divider);
+    card.appendChild(qb);
+    modalBody.appendChild(card);
+  });
+}
+
 // ── Corpus Analysis panel ─────────────────────────────────────
 function _renderCorpusThemes(data, body) {
   const maxDocs = data.documents_analyzed || data.documents_with_themes || 1;
@@ -1124,6 +1265,132 @@ async function runCorpusExtraction(btn) {
 
 document.getElementById('corpusDetails')?.addEventListener('toggle', function() {
   if (this.open) loadCorpusPanel();
+});
+
+// ── Corpus Tensions ───────────────────────────────────────────
+function _renderCorpusTensions(data, container) {
+  container.innerHTML = '';
+
+  const meta = document.createElement('p');
+  meta.className = 'corpus-meta';
+  meta.textContent = `${data.documents_analyzed} doc${data.documents_analyzed !== 1 ? 's' : ''} analyzed${data.llm_extracted ? ' · LLM synthesized' : ''}`;
+  container.appendChild(meta);
+
+  if (!data.contradictions || !data.contradictions.length) {
+    const empty = document.createElement('p');
+    empty.className = 'corpus-meta';
+    empty.textContent = 'No cross-document tensions found.';
+    container.appendChild(empty);
+    return;
+  }
+
+  data.contradictions.forEach(c => {
+    const block = document.createElement('div');
+    block.style.cssText = 'margin-bottom:0.85rem;padding-bottom:0.85rem;border-bottom:1px solid var(--border)';
+
+    const topic = document.createElement('div');
+    topic.style.cssText = 'font-size:0.78rem;color:var(--text-primary);margin-bottom:0.3rem';
+    topic.textContent = `Topic: ${c.topic}`;
+
+    const summary = document.createElement('div');
+    summary.style.cssText = 'font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem;line-height:1.5';
+    summary.textContent = c.tension_summary;
+
+    block.appendChild(topic);
+    block.appendChild(summary);
+
+    (c.positions || []).forEach(pos => {
+      const posEl = document.createElement('div');
+      posEl.style.cssText = 'margin-bottom:0.25rem';
+
+      const stance = document.createElement('div');
+      stance.style.cssText = 'font-size:0.7rem;color:var(--text-secondary)';
+      stance.textContent = pos.stance + (pos.documents && pos.documents.length ? ` (${pos.documents.join(', ')})` : '');
+
+      const q = document.createElement('div');
+      q.style.cssText = 'font-size:0.7rem;font-style:italic;color:var(--text-muted);padding-left:0.6rem;border-left:1px solid var(--border-hard);margin-top:0.15rem';
+      q.textContent = pos.quote ? `"${pos.quote}"` : '';
+
+      posEl.appendChild(stance);
+      if (pos.quote) posEl.appendChild(q);
+      block.appendChild(posEl);
+    });
+
+    container.appendChild(block);
+  });
+}
+
+async function runCorpusTensions(btn) {
+  btn.disabled = true;
+  btn.textContent = '···';
+
+  const container = document.getElementById('corpusTensionsBody');
+
+  const progressEl = document.createElement('p');
+  progressEl.className = 'corpus-meta';
+  progressEl.textContent = 'Starting…';
+  container.innerHTML = '';
+  container.appendChild(progressEl);
+
+  try {
+    const cached = await fetch('/corpus/contradictions');
+    if (cached.ok) {
+      const data = await cached.json();
+      if (data.documents_analyzed > 0) {
+        _renderCorpusTensions({ ...data, llm_extracted: true }, container);
+        return;
+      }
+    }
+  } catch { }
+
+  try {
+    const fd = new FormData();
+    if (activeModel) fd.append('model', activeModel);
+
+    const resp = await fetch('/corpus/contradictions/extract', { method: 'POST', body: fd });
+    if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.error) {
+            progressEl.textContent = `Error: ${msg.error}`;
+          } else if (msg.stage === 'cached' || msg.stage === 'done') {
+            _renderCorpusTensions({ ...msg, llm_extracted: true }, container);
+            return;
+          } else if (msg.stage === 'map') {
+            progressEl.textContent = `Scanning document batch ${msg.batch} of ${msg.total}…`;
+          } else if (msg.stage === 'reduce') {
+            progressEl.textContent = 'Synthesizing cross-document tensions…';
+          }
+        } catch { }
+      }
+    }
+  } catch (err) {
+    container.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = 'corpus-meta';
+    p.textContent = `Error: ${err.message}`;
+    container.appendChild(p);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run';
+  }
+}
+
+document.getElementById('corpusTensionsRunBtn')?.addEventListener('click', function() {
+  runCorpusTensions(this);
 });
 
 // ── Document upload ──────────────────────────────────────────

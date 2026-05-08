@@ -393,6 +393,33 @@
   pointer-events: none;
 }
 
+.doc-tensions-btn {
+  flex-shrink: 0;
+  padding: 0.25rem 0.55rem;
+  font-family: "Consolas", "Menlo", "Courier New", monospace;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(192, 80, 80, 0.07);
+  border: 1px solid rgba(192, 80, 80, 0.25);
+  border-radius: 3px;
+  color: #c05050;
+  cursor: pointer;
+  transition: border-color 0.18s, box-shadow 0.18s;
+  white-space: nowrap;
+}
+
+.doc-tensions-btn:hover {
+  border-color: #c05050;
+  box-shadow: 0 0 6px rgba(192, 80, 80, 0.25);
+}
+
+.doc-tensions-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* ── Corpus Analysis section ──────────────────────────────── */
 .corpus-section {
   border-top: 1px solid var(--border);

@@ -36,6 +36,8 @@ SUMMARIES_DIR   = Path(__file__).parent.parent / "data" / "summaries"
 EXTRACTIONS_DIR = Path(__file__).parent.parent / "data" / "extractions"
 THEMES_DIR       = Path(__file__).parent.parent / "data" / "themes"
 CORPUS_THEMES_PATH = Path(__file__).parent.parent / "data" / "corpus_themes.json"
+CONTRADICTIONS_DIR        = Path(__file__).parent.parent / "data" / "contradictions"
+CORPUS_CONTRADICTIONS_PATH = Path(__file__).parent.parent / "data" / "corpus_contradictions.json"
 MAPS_DIR        = Path(__file__).parent.parent / "data" / "maps"
 SETTINGS_PATH   = Path(__file__).parent.parent / "data" / "settings.json"
 
@@ -495,6 +497,79 @@ Return ONLY a valid JSON array, no prose:
 ]
 
 Sort by doc_count descending. Include all themes that appear in at least one document.
+
+Batch observations:
+{notes}"""
+
+
+_CONTRA_MAP_PROMPT = """\
+You are analyzing an excerpt from an ethnographic interview transcript.
+Identify any of the following tension types within this passage:
+- BELIEF_VS_PRACTICE: the interviewee states a value or belief, then describes behaviour that contradicts it
+- SELF_CONTRADICTION: the speaker explicitly reverses or qualifies a claim they just made
+- HEDGING: strong claim followed by language that undercuts it ("but I know I should", "although sometimes")
+
+For each finding output:
+TYPE: <BELIEF_VS_PRACTICE|SELF_CONTRADICTION|HEDGING>
+QUOTE_A: <verbatim quote, under 25 words>
+QUOTE_B: <verbatim conflicting quote, under 25 words>
+SEVERITY: <strong|moderate|mild>
+DESCRIPTION: <one sentence>
+---
+
+If nothing notable is present, return "nothing notable."
+
+Passage {i}/{n}:
+{text}"""
+
+_CONTRA_REDUCE_PROMPT = """\
+You are synthesizing contradiction analysis notes from an ethnographic interview transcript.
+Below are tension findings from every section. Deduplicate findings that reference the same tension.
+Return ONLY a valid JSON array, no prose:
+[
+  {{
+    "type": "belief_vs_practice|self_contradiction|hedging",
+    "description": "<one sentence>",
+    "quote_a": "<verbatim>",
+    "quote_b": "<verbatim>",
+    "severity": "strong|moderate|mild"
+  }},
+  ...
+]
+If no tensions were found, return [].
+
+Findings:
+{notes}"""
+
+_CONSENSUS_MAP_PROMPT = """\
+You are analyzing contradiction summaries from a batch of ethnographic interview documents.
+Your job is to identify topics where different interviewees hold opposing or incompatible stances.
+
+For each such topic output one line:
+TOPIC: <short label, 2-5 words> | DOCS: <comma-separated filenames> | STANCE_A: <brief stance, under 15 words> | STANCE_B: <brief opposing stance, under 15 words> | QUOTE_A: <verbatim, under 20 words> | QUOTE_B: <verbatim, under 20 words>
+
+If no cross-document disagreements are visible, return "nothing notable."
+
+Input — per-document contradiction summaries:
+{doc_contradictions}"""
+
+_CONSENSUS_REDUCE_PROMPT = """\
+You are synthesizing cross-document consensus breakdown analysis for an ethnographic interview corpus.
+Below are topic disagreements from batches of documents. Merge overlapping topics, combine document lists.
+
+Return ONLY a valid JSON array, no prose:
+[
+  {{
+    "topic": "<canonical label>",
+    "tension_summary": "<one sentence describing the disagreement>",
+    "positions": [
+      {{"stance": "<...>", "documents": ["<filename>"], "quote": "<verbatim>"}},
+      {{"stance": "<...>", "documents": ["<filename>"], "quote": "<verbatim>"}}
+    ]
+  }},
+  ...
+]
+Sort by total document count descending.
 
 Batch observations:
 {notes}"""
@@ -990,6 +1065,223 @@ async def extract_corpus_themes(
         CORPUS_THEMES_PATH.parent.mkdir(parents=True, exist_ok=True)
         CORPUS_THEMES_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         yield json.dumps({"stage": "done", **result}) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+
+# ── Document contradictions ──────────────────────────────────
+
+@app.get("/documents/{filename}/contradictions")
+async def get_contradictions(filename: str):
+    stem = Path(filename).stem
+    contra_path = CONTRADICTIONS_DIR / f"{stem}.json"
+    if contra_path.exists():
+        return {"contradictions": json.loads(contra_path.read_text(encoding="utf-8")), "cached": True}
+    raise HTTPException(status_code=404, detail="No contradictions cached")
+
+
+@app.post("/documents/{filename}/contradictions")
+async def create_contradictions(
+    filename: str,
+    model: str = Form(default=DEFAULT_MODEL),
+    regenerate: bool = Query(default=False),
+):
+    pdf_path = rag.DATA_DIR / filename
+    if not pdf_path.exists() or pdf_path.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    stem = Path(filename).stem
+    contra_path = CONTRADICTIONS_DIR / f"{stem}.json"
+
+    async def generate():
+        if contra_path.exists() and not regenerate:
+            yield json.dumps({"stage": "cached", "contradictions": json.loads(contra_path.read_text(encoding="utf-8"))}) + "\n"
+            return
+
+        chunks = await rag.get_chunks_for_document(filename)
+        if not chunks:
+            def _read_pdf():
+                doc = fitz.open(str(pdf_path))
+                return "".join(page.get_text() for page in doc)
+            text = await asyncio.to_thread(_read_pdf)
+            chunks = [c.strip() for c in rag._chunk(text) if c.strip()]
+
+        batches = [chunks[i:i + _MAP_BATCH_SIZE] for i in range(0, len(chunks), _MAP_BATCH_SIZE)]
+        n = len(batches)
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _run_map(client: httpx.AsyncClient, idx: int, batch: list[str]) -> None:
+            prompt = _CONTRA_MAP_PROMPT.format(i=idx + 1, n=n, text="\n".join(batch))
+            try:
+                resp = await client.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE},
+                )
+                resp.raise_for_status()
+                out = resp.json().get("response", "").strip()
+            except Exception as e:
+                logger.warning("Contradictions map %d/%d failed for %s: %r", idx + 1, n, filename, e)
+                out = "nothing notable."
+            await queue.put((idx, out))
+
+        cached_map = None if regenerate else _load_map_cache(filename, "contradictions")
+        if cached_map is not None:
+            map_results = cached_map
+            yield json.dumps({"stage": "map_cached", "total": len(map_results)}) + "\n"
+        else:
+            map_results = ["nothing notable."] * n
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                tasks = [asyncio.create_task(_run_map(client, i, batch)) for i, batch in enumerate(batches)]
+                for done in range(1, n + 1):
+                    idx, out = await queue.get()
+                    map_results[idx] = out
+                    yield json.dumps({"stage": "map", "batch": done, "total": n}) + "\n"
+                await asyncio.gather(*tasks)
+            _save_map_cache(filename, "contradictions", map_results)
+
+        map_outputs = [
+            f"[Batch {i + 1}/{n}]\n{out}"
+            for i, out in enumerate(map_results)
+            if out and out.lower() != "nothing notable."
+        ]
+        notes = "\n\n".join(map_outputs) if map_outputs else "No tensions identified."
+
+        yield json.dumps({"stage": "reduce"}) + "\n"
+
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                resp = await client.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": _CONTRA_REDUCE_PROMPT.format(notes=notes), "stream": False, "keep_alive": KEEP_ALIVE},
+                )
+                resp.raise_for_status()
+                raw = resp.json().get("response", "").strip()
+        except Exception as e:
+            logger.error("Contradictions reduce failed for %s: %r", filename, e)
+            yield json.dumps({"error": repr(e)}) + "\n"
+            return
+
+        contradictions = _parse_themes_json(raw)
+        CONTRADICTIONS_DIR.mkdir(parents=True, exist_ok=True)
+        contra_path.write_text(json.dumps(contradictions, ensure_ascii=False, indent=2), encoding="utf-8")
+        yield json.dumps({"stage": "done", "contradictions": contradictions}) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+
+@app.get("/corpus/contradictions")
+async def corpus_contradictions():
+    if CORPUS_CONTRADICTIONS_PATH.exists():
+        try:
+            cached = json.loads(CORPUS_CONTRADICTIONS_PATH.read_text(encoding="utf-8"))
+            cached["llm_extracted"] = True
+            return cached
+        except Exception:
+            pass
+
+    all_findings = []
+    doc_files = list(CONTRADICTIONS_DIR.glob("*.json")) if CONTRADICTIONS_DIR.exists() else []
+    for p in doc_files:
+        try:
+            findings = json.loads(p.read_text(encoding="utf-8"))
+            for f in findings:
+                f["source"] = p.stem
+            all_findings.extend(findings)
+        except Exception:
+            continue
+    return {"contradictions": all_findings, "documents_analyzed": len(doc_files), "llm_extracted": False}
+
+
+@app.post("/corpus/contradictions/extract")
+async def extract_corpus_contradictions(
+    model: str = Form(default=DEFAULT_MODEL),
+    regenerate: bool = Query(default=False),
+):
+    if CORPUS_CONTRADICTIONS_PATH.exists() and not regenerate:
+        try:
+            cached = json.loads(CORPUS_CONTRADICTIONS_PATH.read_text(encoding="utf-8"))
+
+            async def _cached():
+                yield json.dumps({"stage": "cached", **cached}) + "\n"
+
+            return StreamingResponse(_cached(), media_type="application/x-ndjson")
+        except Exception:
+            pass
+
+    async def generate():
+        doc_files = list(CONTRADICTIONS_DIR.glob("*.json")) if CONTRADICTIONS_DIR.exists() else []
+        docs = []
+        for p in doc_files:
+            try:
+                findings = json.loads(p.read_text(encoding="utf-8"))
+                if findings:
+                    docs.append({"filename": p.name, "contradictions": findings})
+            except Exception:
+                continue
+
+        if not docs:
+            yield json.dumps({"error": "No per-document contradictions extracted yet. Run Contradictions on individual documents first."}) + "\n"
+            return
+
+        batches = [docs[i:i + _CORPUS_DOC_BATCH] for i in range(0, len(docs), _CORPUS_DOC_BATCH)]
+        n = len(batches)
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _run_map(client: httpx.AsyncClient, idx: int, batch: list[dict]) -> None:
+            doc_contradictions_text = "\n\n".join(
+                f"Document: {d['filename']}\n{json.dumps(d['contradictions'], indent=2)}"
+                for d in batch
+            )
+            prompt = _CONSENSUS_MAP_PROMPT.format(doc_contradictions=doc_contradictions_text)
+            try:
+                resp = await client.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False, "keep_alive": KEEP_ALIVE},
+                )
+                resp.raise_for_status()
+                out = resp.json().get("response", "").strip()
+            except Exception as e:
+                logger.warning("Corpus contradictions map batch %d/%d failed: %r", idx + 1, n, e)
+                out = ""
+            await queue.put((idx, out))
+
+        map_results = [""] * n
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            tasks = [asyncio.create_task(_run_map(client, i, batch)) for i, batch in enumerate(batches)]
+            for done in range(1, n + 1):
+                idx, out = await queue.get()
+                map_results[idx] = out
+                yield json.dumps({"stage": "map", "batch": done, "total": n}) + "\n"
+            await asyncio.gather(*tasks)
+
+        notes = "\n\n".join(
+            f"[Batch {i + 1}/{n}]\n{out}" for i, out in enumerate(map_results) if out
+        ) or "No cross-document disagreements found."
+
+        yield json.dumps({"stage": "reduce"}) + "\n"
+
+        try:
+            async with httpx.AsyncClient(timeout=240.0) as client:
+                resp = await client.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": _CONSENSUS_REDUCE_PROMPT.format(notes=notes), "stream": False, "keep_alive": KEEP_ALIVE},
+                )
+                resp.raise_for_status()
+                raw = resp.json().get("response", "").strip()
+        except Exception as e:
+            logger.error("Corpus contradictions reduce failed: %r", e)
+            yield json.dumps({"error": repr(e)}) + "\n"
+            return
+
+        contradictions = _parse_themes_json(raw)
+        result = {
+            "contradictions": contradictions,
+            "documents_with_contradictions": len(docs),
+        }
+        CORPUS_CONTRADICTIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CORPUS_CONTRADICTIONS_PATH.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        yield json.dumps({"stage": "done", "contradictions": contradictions, "documents_with_contradictions": len(docs)}) + "\n"
 
     return StreamingResponse(generate(), media_type="application/x-ndjson")
 
