@@ -1,35 +1,41 @@
 # Interview Analyzer
 
-A local-only tool for qualitative analysis of ethnographic interview PDFs using local LLMs via Ollama and retrieval-augmented generation (RAG). No data leaves the machine.
+A private, local tool for analyzing ethnographic interview PDFs using AI. Your documents stay on your computer — nothing is sent to the cloud.
+
+You can upload interview transcripts, chat with an AI that has actually read them, generate summaries, pull out structured data, and identify themes across your whole corpus.
 
 ---
 
-## Fresh Windows Setup
+## First-time setup (Windows)
 
-### 1. Install Python via uv
+You only need to do this once.
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) — the project's package manager:
+### 1. Install uv (the Python manager)
+
+Open PowerShell and run:
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-Restart your terminal after installation. Python 3.11 will be managed automatically by uv — no separate Python install required.
+Restart your terminal after this finishes.
 
 ### 2. Install Ollama
 
-Download and install [Ollama for Windows](https://ollama.com/download/windows). It runs as a background service on port `11434`.
+[Download Ollama for Windows](https://ollama.com/download/windows) and install it. Once installed, it runs quietly in the background — you don't need to open it.
 
-### 3. Pull required models
+### 3. Download the AI models
+
+In PowerShell:
 
 ```powershell
 ollama pull gemma4:e4b
 ollama pull mxbai-embed-large
 ```
 
-`gemma4:e4b` is the default chat model. `mxbai-embed-large` powers RAG document retrieval. Any other Ollama model can be selected from the UI at runtime.
+`gemma4:e4b` is the model that reads and responds to your questions. `mxbai-embed-large` is what lets the tool search your documents. This download only happens once and may take a few minutes depending on your connection.
 
-### 4. Clone the repo and install dependencies
+### 4. Set up the project
 
 ```powershell
 git clone <repo-url>
@@ -37,82 +43,73 @@ cd interview-analyzer
 uv sync
 ```
 
-### 5. Run the app
+### 5. Start the app
 
 ```powershell
 uv run python main.py
 ```
 
-The app starts at `http://localhost:8000`. The SQLite database (`data/interview-analyzer.db`) is created automatically on first run and is gitignored.
+Then open your browser to **http://localhost:8000**. That's it — the app creates its database automatically on first run.
 
 ---
 
-## Features
+## Everyday use
 
-**Chat with session management**
-- Create, rename, and delete named conversations.
-- Each session stores full message history (including chain-of-thought) in SQLite.
-- Model selection is persisted across restarts in `data/settings.json`.
+**Starting the app:** Run `uv run python main.py` in the project folder, then go to http://localhost:8000. Make sure Ollama is running (it usually starts automatically with Windows).
 
-**RAG over interview PDFs**
-- Upload PDFs via the `+` button in the sidebar, or drop them directly into `app/static/data/`. They appear in the sidebar for ingestion.
-- Ingestion: extracts text via PyMuPDF, chunks at 500 characters with 50-character overlap, embeds each chunk via `mxbai-embed-large`, and upserts into a per-document ChromaDB collection (`data/chroma/`).
-- At query time, the user message is embedded and the top-5 most similar chunks are retrieved across all ingested documents, with at least one chunk guaranteed from each document to prevent any single interview from dominating the context.
+**Adding interviews:** Click the `+` button in the sidebar, or drop PDF files directly into the `app/static/data/` folder. They'll appear in the sidebar ready to ingest.
 
-**Document summaries**
-- Each ingested PDF in the sidebar has a "Summary" action (`POST /documents/{filename}/summary`).
-- Uses a concurrent map-reduce pipeline over RAG chunks: batches of 20 chunks are sent to the model in parallel to extract notes, then all notes are synthesized in a single reduce call into a structured markdown summary (Interviewee Profile, Key Stances, Internal Tensions, Notable Quotes, Recurring Themes).
-- Falls back to reading the PDF directly if the document hasn't been ingested yet.
-- Results are cached in `data/summaries/`. Add `?regenerate=true` to bypass the cache and rerun.
-- Long documents may take 2–5 minutes to summarize depending on Ollama throughput.
+**Ingesting a document:** Click "Ingest" next to a PDF. This reads the document, breaks it into searchable chunks, and indexes it so the AI can find relevant passages when you ask questions. A longer transcript takes a few minutes.
 
-**Structured data extraction**
-- Each ingested PDF has an "Extract" action (`POST /documents/{filename}/extract`) that pulls specific fields out of the transcript into clean structured output.
-- Extracted fields: acreage, grant status, generational status, farm type.
-- Uses the same map-reduce pipeline as summaries: the map step identifies relevant mentions per chunk, and the reduce step consolidates them into a JSON object. Unmentioned fields are `null`.
-- Results are cached in `data/extractions/`. Add `?regenerate=true` to rerun.
+**Chatting:** Type a question in the chat box. The AI will search your ingested documents and ground its answer in what's actually in the transcripts. You can ask it to compare across interviews, find patterns, or dig into a specific topic.
 
-**Corpus-level theme analysis**
-- Each ingested PDF has a "Themes" action (`POST /documents/{filename}/themes`) that extracts recurring thematic concepts using the same map-reduce pipeline.
-- The map step identifies themes per passage as short labels with supporting quotes; the reduce step consolidates them into a ranked JSON list with mention counts.
-- Results are cached in `data/themes/` and stored in a `document_themes` SQLite table for fast cross-document aggregation.
-- `GET /corpus/themes` aggregates themes across all analyzed documents, returning each theme ranked by how many documents mention it (`doc_count`) and total mention count.
-- The sidebar shows a **Corpus Analysis** collapsible panel (visible once at least one document has themes extracted) with a frequency bar chart of top themes.
-- The `/chat` endpoint automatically detects corpus-level questions (keywords like "across all documents", "recurring", "pattern", "frequency") and injects the aggregated corpus theme summary into the system prompt instead of (or alongside) RAG chunks.
+**Summaries:** Click "Summary" on any document to get a structured overview: interviewee profile, key stances, internal tensions, notable quotes, and recurring themes.
 
-**Streaming responses with chain-of-thought**
-- Ollama responses stream as NDJSON. The browser's `ThinkParser` splits `<think>...</think>` tokens from response tokens in real time.
-- Chain-of-thought is shown as a collapsible "Reasoning" panel above the final answer.
-- After streaming completes, the response is re-rendered with markdown and KaTeX.
+**Data extraction:** Click "Extract" to pull structured fields out of a transcript (acreage, grant status, generational status, farm type). Useful for building a comparison table across interviews.
 
-**Model switching**
-- The header lists all locally installed Ollama models (polled via HTMX).
-- Switching models unloads the previous model from VRAM and warm-starts the new one.
+**Theme analysis:** Click "Themes" to extract recurring thematic concepts from a document. Once you've run this on multiple documents, the sidebar shows a **Corpus Analysis** panel with a frequency chart of themes across your whole set of interviews.
 
-**Offline-capable**
-- All vendor libraries (htmx, marked, KaTeX) are bundled in `app/static/vendor/`. No CDN calls at runtime.
-- Theme and sidebar state are persisted in `localStorage`.
+**Corpus questions:** You can ask the chat questions like "what themes recur across all documents?" or "what patterns do you see across the interviews?" — the app detects these and pulls in the aggregated theme data automatically.
 
 ---
 
-## Architecture
+## What you can see while the AI thinks
+
+Responses stream in real time. You'll often see a collapsible **Reasoning** panel above the answer — that's the AI's chain-of-thought, which can be useful for checking whether it understood your question correctly.
+
+---
+
+## Features at a glance
+
+| Feature | What it does |
+|---|---|
+| RAG chat | Asks questions grounded in your actual transcripts |
+| Summaries | Structured overviews of each interview |
+| Extraction | Pulls specific fields into structured data |
+| Theme analysis | Identifies and ranks recurring themes per document |
+| Corpus analysis | Aggregates themes across all interviews |
+| Session history | Saves all your conversations so you can return to them |
+| Model switching | Swap AI models from the header without restarting |
+
+---
+
+## Architecture (for reference)
 
 | Layer | Details |
 |---|---|
 | Backend | FastAPI, Python, `aiosqlite` |
-| Frontend | Vanilla JS ES modules, HTMX, Jinja2 templates — no build step |
-| Database | SQLite at `data/interview-analyzer.db` (sessions + messages) |
+| Frontend | Vanilla JS, HTMX, Jinja2 — no build step |
+| Database | SQLite at `data/interview-analyzer.db` |
 | Vector store | ChromaDB at `data/chroma/` |
-| LLM inference | Ollama (local), default model `gemma4:e4b` |
+| LLM inference | Ollama (local), default `gemma4:e4b` |
 | Embeddings | Ollama, `mxbai-embed-large` |
 
 ---
 
-## Limitations
+## Limitations worth knowing
 
-- **Ollama must be running locally.** There is no support for remote inference endpoints. If Ollama is unreachable on port 11434, all chat and ingestion will fail.
-- **Ingestion is sequential per chunk.** Each chunk is embedded one at a time via Ollama. Ingesting a large PDF can take several minutes.
-- **Summary and extraction generation is Ollama-bound.** Map calls run concurrently but each is still a local LLM call. A 30-page transcript may take 2–5 minutes. Use `?regenerate=true` to bypass the cache if you change the model or want to rerun.
-- **Extraction reliability depends on the model.** The reduce step asks the model for JSON. A JSON parse fallback is in place, but field values are only as accurate as the model's reading of the transcript.
-- **No authentication or multi-user support.** Anyone with network access to port 8000 can read all sessions and documents.
-- **Windows vs. Linux/WSL2.** On Windows, Ollama is reached at `localhost:11434`. On Linux, the app auto-detects the default gateway IP to support WSL2 setups where Ollama runs on the Windows host.
+- **Ollama must be running.** If the app can't connect to Ollama on port 11434, chat and ingestion won't work.
+- **Ingestion takes time.** Each chunk is embedded one at a time. A long transcript can take several minutes.
+- **Summaries and extraction are slow.** The map-reduce pipeline makes many AI calls. A 30-page transcript may take 2–5 minutes. If you change models and want to rerun, add `?regenerate=true` to the URL.
+- **Extraction accuracy depends on the model.** The AI reads the transcript and makes its best judgment — always verify extracted fields against the source.
+- **No login or multi-user support.** Anyone with access to port 8000 on your machine can see all sessions and documents.

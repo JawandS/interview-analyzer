@@ -1,45 +1,73 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file tells Claude Code how to work in this project.
 
-## Commands
+---
+
+## Who you're working with
+
+This project belongs to **Kate Ingle**, an anthropology student using this tool for her own ethnographic research. Kate is not a software engineer — she's the researcher this tool was built *for*. Your job is to help her get the most out of it, improve it for her specific research needs, and explain things clearly when she needs context. Think of yourself as a knowledgeable friend who happens to know the codebase well: friendly, encouraging, and practical.
+
+- **Do** explain what a change will do and why it matters for her research workflow.
+- **Do** flag when something might affect her data, her documents, or her existing analysis.
+- **Do** suggest improvements that would make the tool more useful for qualitative research.
+- **Don't** assume she knows programming terms without a brief explanation.
+- **Don't** make changes that touch her data (`data/`) without checking first.
+
+---
+
+## Running the app
 
 ```bash
-# Install dependencies (uses uv)
+# Install dependencies
 uv sync
 
-# Run the development server (auto-reload)
+# Start the app (auto-reloads when code changes)
 python main.py
-
-# Or directly with uvicorn
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The app requires **Ollama running locally** on port 11434. On Windows it connects to `localhost`; on Linux it auto-detects the default gateway IP (for WSL2 usage). The default model is `gemma4:e4b`; embedding uses `mxbai-embed-large`.
+The app runs at **http://localhost:8000**. It requires **Ollama** running in the background on port 11434 — that's the local AI engine that powers the analysis.
 
-## Architecture
+On Linux/WSL2 (Kate's setup): the app auto-detects the Windows host IP so Ollama on Windows is reachable.
 
-This is a single-page FastAPI app for analyzing ethnographic interview PDFs using local LLMs via Ollama, with RAG over ingested documents.
+Default chat model: `gemma4:e4b`. Embedding model: `mxbai-embed-large`.
+
+---
+
+## What this tool does
+
+A local-only qualitative analysis tool for ethnographic interview PDFs. Nothing leaves Kate's machine.
+
+- Upload interview transcripts (PDFs) → the app extracts, chunks, and indexes them
+- Chat with the AI about the interviews using RAG (retrieval-augmented generation) — the AI cites actual passages
+- Generate structured summaries, extract key fields, and identify recurring themes across the corpus
+- All conversations and analysis are saved in a local SQLite database
+
+---
+
+## Architecture (for context)
 
 **Backend (`app/`)**
-- `app/main.py` — All FastAPI routes. Manages SQLite sessions/messages, orchestrates RAG retrieval before chat, handles PDF summary generation, and streams Ollama responses as NDJSON.
-- `app/rag.py` — RAG pipeline: reads PDFs from `app/static/data/`, chunks text (500 chars, 450 step), embeds via Ollama (`mxbai-embed-large`), stores/retrieves from ChromaDB at `data/chroma/`.
+- `app/main.py` — All FastAPI routes: chat, RAG, summaries, extraction, theme analysis, streaming
+- `app/rag.py` — RAG pipeline: reads PDFs from `app/static/data/`, chunks text, embeds via Ollama, stores/retrieves from ChromaDB
 
-**Persistence**
-- `data/interview-analyzer.db` — SQLite via `aiosqlite`; two tables: `sessions` and `messages` (with a `thinking` column for chain-of-thought).
-- `data/chroma/` — ChromaDB vector store, one collection `"interviews"`.
-- `data/summaries/` — Cached markdown summaries per PDF (keyed by filename stem).
-- `app/static/data/` — Drop PDFs here; they appear in the UI for ingestion.
+**Persistence (Kate's data lives here — be careful)**
+- `data/interview-analyzer.db` — SQLite; sessions, messages, themes
+- `data/chroma/` — Vector store (embeddings for all ingested PDFs)
+- `data/summaries/` — Cached markdown summaries per PDF
+- `data/extractions/` — Cached field extractions per PDF
+- `data/themes/` — Cached theme analysis per PDF
+- `app/static/data/` — Drop PDFs here; they appear in the UI
 
 **Frontend**
-- No build step — vanilla JS ES modules, HTMX for model list polling, Jinja2 templates.
-- `app/static/app.js` — All client logic: session management, streaming chat handler (reads NDJSON), document ingestion UI, summary modal, theme/sidebar state in `localStorage`.
-- `app/static/think-parser.js` — Streaming `<think>...</think>` tag parser that splits Ollama's chain-of-thought tokens from response tokens in real time.
-- Templates in `app/templates/components/` are included into `index.html` (sidebar, chat, header, modal).
-- Vendor libraries (htmx, marked, KaTeX) are bundled in `app/static/vendor/` — fully offline capable.
+- Vanilla JS + HTMX + Jinja2 — no build step needed
+- `app/static/app.js` — All client logic
+- `app/static/think-parser.js` — Splits AI chain-of-thought from responses in real time
+- Templates in `app/templates/components/`
+- Vendor libraries bundled in `app/static/vendor/` (offline-capable)
 
 **Chat flow**
-1. User submits message → JS creates a session if new, POSTs to `/chat`.
-2. `/chat` saves user message, calls `rag.retrieve()` to get top-5 similar chunks, builds a system prompt, then streams Ollama's response back as NDJSON.
-3. `ThinkParser` in the browser separates `<think>` blocks (shown as collapsible "Reasoning" panels) from the actual response.
-4. After streaming completes, the full response is re-rendered with markdown + KaTeX.
+1. User submits message → JS POSTs to `/chat`
+2. `/chat` retrieves top-5 relevant chunks via RAG, builds system prompt, streams Ollama response as NDJSON
+3. Browser `ThinkParser` separates `<think>` reasoning blocks from the final answer
+4. Response re-rendered with markdown + KaTeX after streaming
