@@ -17,7 +17,11 @@
       "Bash(Select-Object FullName, PSIsContainer)",
       "Bash(Format-Table)",
       "mcp__ide__executeCode",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(git -C \"C:\\\\Users\\\\jawan\\\\Desktop\\\\code\\\\interview-analyzer\\\\.claude\\\\worktrees\\\\agent-ab28ac7a64cc4f2ed\" diff main -- app/main.py)",
+      "Bash(git -C \"C:\\\\Users\\\\jawan\\\\Desktop\\\\code\\\\interview-analyzer\" diff main \"worktree-agent-ab28ac7a64cc4f2ed\" -- app/main.py)",
+      "Bash(git -C \"C:\\\\Users\\\\jawan\\\\Desktop\\\\code\\\\interview-analyzer\" diff main \"worktree-agent-a84af4c20bdebfc27\" -- app/static/app.js app/templates/components/sidebar.html)",
+      "Bash(git *)"
     ]
   }
 }

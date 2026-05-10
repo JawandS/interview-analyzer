@@ -11,10 +11,13 @@ logger = logging.getLogger(__name__)
 DATA_DIR        = Path(__file__).parent / "static" / "data"
 CHROMA_DIR      = Path(__file__).parent.parent / "data" / "chroma"
 EMBED_MODEL     = "mxbai-embed-large"
-CHUNK_SIZE      = 500
-CHUNK_STEP      = 450
+CHUNK_SIZE      = 900
+CHUNK_STEP      = 750
 EMBED_BATCH_SIZE = 64
-PER_DOC_CAP     = 2
+PER_DOC_CAP      = 2
+# Max chunks retrieved from each position bucket (early / middle / late third of doc).
+# Prevents any single region from monopolising the context window.
+PER_BUCKET_CAP   = 2
 
 
 def _chunk(text: str) -> list[str]:
@@ -102,7 +105,11 @@ async def ingest_file(filename: str, ollama_base: str) -> dict:
             ids.append(f"{filename}::{i}")
             embeddings.append(vec)
             documents.append(chunk)
-            metadatas.append({"source": filename, "chunk_index": i})
+            metadatas.append({
+                "source": filename,
+                "chunk_index": i,
+                "total_chunks": len(indexed_chunks),
+            })
 
     if ids:
         await asyncio.to_thread(
@@ -156,11 +163,26 @@ async def retrieve(query: str, ollama_base: str, n: int = 5) -> list[dict]:
             n_results=top_k,
             include=["documents", "metadatas", "distances"],
         )
+        def _position(meta: dict) -> float:
+            total = meta.get("total_chunks", 0)
+            if total <= 1:
+                return 0.0
+            return meta.get("chunk_index", 0) / (total - 1)
+
+        def _position_label(pos: float) -> str:
+            if pos < 0.33:
+                return "early"
+            if pos < 0.67:
+                return "middle"
+            return "late"
+
         candidates = [
             {
                 "text": text,
                 "source": meta.get("source", ""),
                 "chunk_index": meta.get("chunk_index", 0),
+                "position": _position(meta),
+                "position_label": _position_label(_position(meta)),
                 "distance": dist,
             }
             for text, meta, dist in zip(
@@ -169,21 +191,36 @@ async def retrieve(query: str, ollama_base: str, n: int = 5) -> list[dict]:
         ]
         candidates.sort(key=lambda x: x["distance"])
 
+        # Two-pass selection:
+        # Pass 1 — enforce per-doc AND per-bucket caps to spread coverage.
+        # Pass 2 — fill remaining slots from overflow (still per-doc capped).
         selected: list[dict] = []
         overflow: list[dict] = []
         source_counts: dict[str, int] = {}
+        bucket_counts: dict[str, int] = {}   # key: "source::bucket"
+
         for candidate in candidates:
+            if len(selected) == n:
+                break
+            src = candidate["source"]
+            bucket_key = f"{src}::{candidate['position_label']}"
+            doc_ok = source_counts.get(src, 0) < PER_DOC_CAP
+            bucket_ok = bucket_counts.get(bucket_key, 0) < PER_BUCKET_CAP
+            if doc_ok and bucket_ok:
+                selected.append(candidate)
+                source_counts[src] = source_counts.get(src, 0) + 1
+                bucket_counts[bucket_key] = bucket_counts.get(bucket_key, 0) + 1
+            else:
+                overflow.append(candidate)
+
+        # Pass 2: fill with best remaining candidates, still respecting per-doc cap.
+        for candidate in overflow:
             if len(selected) == n:
                 break
             src = candidate["source"]
             if source_counts.get(src, 0) < PER_DOC_CAP:
                 selected.append(candidate)
                 source_counts[src] = source_counts.get(src, 0) + 1
-            else:
-                overflow.append(candidate)
-
-        if len(selected) < n:
-            selected.extend(overflow[: n - len(selected)])
 
         return selected
 

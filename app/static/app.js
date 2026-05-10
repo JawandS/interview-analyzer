@@ -687,33 +687,47 @@ function renderDocList(docs) {
       check.textContent = '✓';
       item.appendChild(check);
 
-      const sumBtn = document.createElement('button');
-      sumBtn.className = 'doc-summary-btn';
-      sumBtn.textContent = 'Summary';
-      sumBtn.title = 'Generate or view summary';
-      sumBtn.addEventListener('click', () => summarizeDocument(doc.name, sumBtn));
-      item.appendChild(sumBtn);
+      const menuWrap = document.createElement('div');
+      menuWrap.className = 'doc-menu';
 
-      const extBtn = document.createElement('button');
-      extBtn.className = 'doc-extract-btn';
-      extBtn.textContent = 'Extract';
-      extBtn.title = 'Extract structured field data';
-      extBtn.addEventListener('click', () => extractDocument(doc.name, extBtn));
-      item.appendChild(extBtn);
+      const menuBtn = document.createElement('button');
+      menuBtn.className = 'doc-menu-btn';
+      menuBtn.title = 'Actions';
+      menuBtn.textContent = '⋯';
+      menuWrap.appendChild(menuBtn);
 
-      const themBtn = document.createElement('button');
-      themBtn.className = 'doc-themes-btn';
-      themBtn.textContent = 'Themes';
-      themBtn.title = 'Extract themes from this document';
-      themBtn.addEventListener('click', () => themeDocument(doc.name, themBtn));
-      item.appendChild(themBtn);
+      const dropdown = document.createElement('div');
+      dropdown.className = 'doc-dropdown';
 
-      const tensBtn = document.createElement('button');
-      tensBtn.className = 'doc-tensions-btn';
-      tensBtn.textContent = 'Tensions';
-      tensBtn.title = 'Detect internal contradictions and tensions';
-      tensBtn.addEventListener('click', () => tensionDocument(doc.name, tensBtn));
-      item.appendChild(tensBtn);
+      const actions = [
+        { label: 'Summary',  fn: () => summarizeDocument(doc.name, dropdown.querySelector('[data-action="Summary"]')) },
+        { label: 'Extract',  fn: () => extractDocument(doc.name,   dropdown.querySelector('[data-action="Extract"]')) },
+        { label: 'Themes',   fn: () => themeDocument(doc.name,     dropdown.querySelector('[data-action="Themes"]')) },
+        { label: 'Tensions', fn: () => tensionDocument(doc.name,   dropdown.querySelector('[data-action="Tensions"]')) },
+      ];
+
+      actions.forEach(({ label, fn }) => {
+        const opt = document.createElement('button');
+        opt.className = 'doc-dropdown-item';
+        opt.dataset.action = label;
+        opt.textContent = label;
+        opt.addEventListener('click', e => {
+          e.stopPropagation();
+          dropdown.classList.remove('open');
+          fn();
+        });
+        dropdown.appendChild(opt);
+      });
+
+      menuWrap.appendChild(dropdown);
+      item.appendChild(menuWrap);
+
+      menuBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        const isOpen = dropdown.classList.contains('open');
+        document.querySelectorAll('.doc-dropdown.open').forEach(d => d.classList.remove('open'));
+        if (!isOpen) dropdown.classList.add('open');
+      });
     } else {
       const btn = document.createElement('button');
       btn.className = 'doc-ingest-btn';
@@ -726,6 +740,10 @@ function renderDocList(docs) {
     docList.appendChild(item);
   });
 }
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.doc-dropdown.open').forEach(d => d.classList.remove('open'));
+});
 
 async function ingestDocument(filename) {
   ingestingSet.add(filename);

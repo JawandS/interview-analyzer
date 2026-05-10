@@ -1329,7 +1329,7 @@ async def chat(
     chunks = await rag.retrieve(message, OLLAMA_BASE)
     if corpus_context:
         excerpt_lines = [
-            f"[Source: {c['source']}, excerpt {c['chunk_index']}]\n{c['text']}"
+            f"[Source: {c['source']}, excerpt {c['chunk_index']} ({c.get('position_label', '?')} of interview)]\n{c['text']}"
             for c in chunks
         ] if chunks else []
         rag_block = ("\n\n---\n\nSupporting excerpts:\n\n" + "\n\n---\n\n".join(excerpt_lines)) if excerpt_lines else ""
@@ -1341,12 +1341,13 @@ async def chat(
         )
     elif chunks:
         excerpt_lines = [
-            f"[Source: {c['source']}, excerpt {c['chunk_index']}]\n{c['text']}"
+            f"[Source: {c['source']}, excerpt {c['chunk_index']} ({c.get('position_label', '?')} of interview)]\n{c['text']}"
             for c in chunks
         ]
         system_prompt = (
             "You are analyzing an ethnographic interview corpus. "
             "Use the following excerpts to inform your response. "
+            "Excerpts are drawn from different parts of each interview (early/middle/late). "
             "Whenever you draw on an excerpt, cite it using the format (Source: filename, excerpt chunk_index).\n\n"
             + "\n\n---\n\n".join(excerpt_lines)
         )
