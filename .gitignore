@@ -9,8 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
-# Local data
+# Local data (now stored outside project in ~/.interview-analyzer/)
 data/
+app/static/data/
 
 # Claude agents
 worktrees/

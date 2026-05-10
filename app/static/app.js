@@ -617,7 +617,7 @@ document.getElementById('messages').addEventListener('click', async (e) => {
   try {
     const res  = await fetch(`/pdf/${encodeURIComponent(file)}/page?chunk=${chunk}`);
     const data = await res.json();
-    const pdfUrl = `/static/data/${encodeURIComponent(file)}#page=${data.page}`;
+    const pdfUrl = `/documents/${encodeURIComponent(file)}/file#page=${data.page}`;
     const title  = file.replace(/\.pdf$/i, '');
     const body   = data.text
       ? `<blockquote style="white-space:pre-wrap;margin:0 0 1rem">${data.text}</blockquote><a href="${pdfUrl}" target="_blank" style="font-size:.85rem">Open PDF (page ${data.page}) ↗</a>`
@@ -626,7 +626,7 @@ document.getElementById('messages').addEventListener('click', async (e) => {
     modalBody.innerHTML = body;
     modalOverlay.classList.add('open');
   } catch {
-    window.open(`/static/data/${encodeURIComponent(file)}`, '_blank');
+    window.open(`/documents/${encodeURIComponent(file)}/file`, '_blank');
   }
 });
 

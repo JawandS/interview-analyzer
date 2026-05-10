@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -8,8 +9,9 @@ import chromadb
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR        = Path(__file__).parent / "static" / "data"
-CHROMA_DIR      = Path(__file__).parent.parent / "data" / "chroma"
+_BASE_DIR   = Path(os.environ.get("INTERVIEW_ANALYZER_DATA", Path.home() / ".interview-analyzer"))
+DATA_DIR    = _BASE_DIR / "pdfs"
+CHROMA_DIR  = _BASE_DIR / "chroma"
 EMBED_MODEL     = "mxbai-embed-large"
 CHUNK_SIZE      = 900
 CHUNK_STEP      = 750

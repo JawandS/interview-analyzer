@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import asyncio
@@ -31,15 +31,16 @@ def _ollama_host() -> str:
 OLLAMA_BASE   = f"http://{_ollama_host()}:11434"
 DEFAULT_MODEL = "gemma4:e4b"
 KEEP_ALIVE    = -1
-DB_PATH       = Path(__file__).parent.parent / "data" / "interview-analyzer.db"
-SUMMARIES_DIR   = Path(__file__).parent.parent / "data" / "summaries"
-EXTRACTIONS_DIR = Path(__file__).parent.parent / "data" / "extractions"
-THEMES_DIR       = Path(__file__).parent.parent / "data" / "themes"
-CORPUS_THEMES_PATH = Path(__file__).parent.parent / "data" / "corpus_themes.json"
-CONTRADICTIONS_DIR        = Path(__file__).parent.parent / "data" / "contradictions"
-CORPUS_CONTRADICTIONS_PATH = Path(__file__).parent.parent / "data" / "corpus_contradictions.json"
-MAPS_DIR        = Path(__file__).parent.parent / "data" / "maps"
-SETTINGS_PATH   = Path(__file__).parent.parent / "data" / "settings.json"
+_BASE_DIR              = rag._BASE_DIR
+DB_PATH                = _BASE_DIR / "interview-analyzer.db"
+SUMMARIES_DIR          = _BASE_DIR / "summaries"
+EXTRACTIONS_DIR        = _BASE_DIR / "extractions"
+THEMES_DIR             = _BASE_DIR / "themes"
+CORPUS_THEMES_PATH     = _BASE_DIR / "corpus_themes.json"
+CONTRADICTIONS_DIR     = _BASE_DIR / "contradictions"
+CORPUS_CONTRADICTIONS_PATH = _BASE_DIR / "corpus_contradictions.json"
+MAPS_DIR               = _BASE_DIR / "maps"
+SETTINGS_PATH          = _BASE_DIR / "settings.json"
 
 
 def _load_settings() -> dict:
@@ -122,6 +123,7 @@ async def _unload(model: str) -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     logging.basicConfig(level=logging.INFO)
+    rag.DATA_DIR.mkdir(parents=True, exist_ok=True)
     await _init_db()
     asyncio.create_task(_warmup(_active_model))
     yield
@@ -311,6 +313,16 @@ async def pdf_page_for_chunk(filename: str, chunk: int = Query(...)):
         return JSONResponse({"page": page_num, "text": text})
     except Exception:
         return JSONResponse({"page": 1, "text": None})
+
+
+@app.get("/documents/{filename}/file")
+async def serve_document(filename: str):
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=404)
+    path = rag.DATA_DIR / filename
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="application/pdf", filename=filename)
 
 
 # ── Document summaries ───────────────────────────────────────
