@@ -324,6 +324,18 @@ async def get_summary(filename: str):
     raise HTTPException(status_code=404, detail="No summary cached")
 
 
+def _batch_position_label(i: int, n: int) -> str:
+    """Return early/middle/late label for batch i (0-indexed) of n total batches."""
+    if n <= 1:
+        return "full interview"
+    pos = i / (n - 1)
+    if pos < 0.33:
+        return "early"
+    if pos < 0.67:
+        return "middle"
+    return "late"
+
+
 def _load_map_cache(filename: str, kind: str) -> list[str] | None:
     path = MAPS_DIR / kind / f"{Path(filename).stem}.json"
     if path.exists():
@@ -358,8 +370,9 @@ Passage {i}/{n} from {filename}:
 
 _REDUCE_PROMPT = """\
 You are synthesizing notes from an ethnographic interview transcript.
-Below are extracted notes from every section. Produce a structured summary \
-using the headings below. Be specific — use the interviewee's own words where possible.
+Below are extracted notes from every section of the interview, labelled early/middle/late.
+Give equal analytical weight to all parts — do not over-represent the interview's conclusions. \
+Produce a structured summary using the headings below. Be specific — use the interviewee's own words where possible.
 
 ## Interviewee Profile
 (background, role, location, context — only what is stated)
@@ -396,6 +409,7 @@ Passage {i}/{n}:
 
 _EXTRACT_REDUCE_PROMPT = """\
 You are synthesizing field extraction notes from an ethnographic farm interview transcript.
+The notes are labelled early/middle/late — draw from all parts of the interview equally.
 Consolidate the notes below into this JSON schema. Use null for fields with no evidence.
 Keep values concise (under 20 words). Return ONLY valid JSON, no explanation or prose.
 
@@ -428,7 +442,9 @@ Passage {i}/{n}:
 
 _THEMES_REDUCE_PROMPT = """\
 You are consolidating thematic analysis notes from an ethnographic interview transcript.
-Below are theme observations from every section of the document.
+Below are theme observations from every section of the document, labelled early/middle/late.
+Give equal weight to observations from all parts of the interview — themes that appear only early \
+or only middle are just as valid as those near the end.
 Merge duplicates (same concept, different wording), count how many section batches mention each theme, \
 and select the best supporting quote for each.
 
@@ -524,7 +540,9 @@ Passage {i}/{n}:
 
 _CONTRA_REDUCE_PROMPT = """\
 You are synthesizing contradiction analysis notes from an ethnographic interview transcript.
-Below are tension findings from every section. Deduplicate findings that reference the same tension.
+Below are tension findings from every section, labelled early/middle/late.
+Give equal weight to all parts — tensions that appear early in the interview matter as much as those near the end.
+Deduplicate findings that reference the same tension.
 Return ONLY a valid JSON array, no prose:
 [
   {{
@@ -665,7 +683,7 @@ async def create_extraction(
             _save_map_cache(filename, "extract", map_results)
 
         map_outputs = [
-            f"[Batch {i + 1}/{n}]\n{out}"
+            f"[Batch {i + 1}/{n} — {_batch_position_label(i, n)} of interview]\n{out}"
             for i, out in enumerate(map_results)
             if out and out.lower() != "nothing notable."
         ]
@@ -755,7 +773,7 @@ async def create_summary(
             _save_map_cache(filename, "summary", map_results)
 
         map_outputs: list[str] = [
-            f"[Batch {i + 1}/{n}]\n{out}"
+            f"[Batch {i + 1}/{n} — {_batch_position_label(i, n)} of interview]\n{out}"
             for i, out in enumerate(map_results)
             if out and out.lower() != "nothing notable."
         ]
@@ -866,7 +884,7 @@ async def create_themes(
             _save_map_cache(filename, "themes", map_results)
 
         map_outputs = [
-            f"[Batch {i + 1}/{n}]\n{out}"
+            f"[Batch {i + 1}/{n} — {_batch_position_label(i, n)} of interview]\n{out}"
             for i, out in enumerate(map_results)
             if out and out.lower() != "nothing notable."
         ]
@@ -1141,7 +1159,7 @@ async def create_contradictions(
             _save_map_cache(filename, "contradictions", map_results)
 
         map_outputs = [
-            f"[Batch {i + 1}/{n}]\n{out}"
+            f"[Batch {i + 1}/{n} — {_batch_position_label(i, n)} of interview]\n{out}"
             for i, out in enumerate(map_results)
             if out and out.lower() != "nothing notable."
         ]

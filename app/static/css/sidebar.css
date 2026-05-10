@@ -386,6 +386,17 @@
   pointer-events: none;
 }
 
+.doc-dropdown-item.in-progress {
+  color: var(--accent);
+  opacity: 0.8;
+}
+
+.doc-menu-btn.running {
+  color: var(--accent);
+  border-color: var(--accent);
+  opacity: 0.85;
+}
+
 /* ── Corpus Analysis section ──────────────────────────────── */
 .corpus-section {
   border-top: 1px solid var(--border);

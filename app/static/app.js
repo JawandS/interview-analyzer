@@ -634,6 +634,115 @@ document.getElementById('messages').addEventListener('click', async (e) => {
 const docList = document.getElementById('docList');
 const ingestingSet = new Set();
 let docPollTimer = null;
+let lastDocs = [];
+
+// ── Workflow state ───────────────────────────────────────────
+// Tracks in-progress per-document workflows so the modal can be
+// reopened mid-run and the dropdown items show the right state.
+const workflowState = new Map(); // key → { label, fraction, startTime, totalBatches, doneBatches }
+
+function wfKey(filename, action) { return `${filename}::${action}`; }
+
+function startWorkflow(filename, action) {
+  workflowState.set(wfKey(filename, action), {
+    label: 'Starting…', fraction: 0,
+    startTime: Date.now(), totalBatches: null, doneBatches: 0,
+  });
+  renderDocList(lastDocs);
+}
+
+function updateWorkflow(filename, action, label, fraction, doneBatches, totalBatches) {
+  const s = workflowState.get(wfKey(filename, action));
+  if (!s) return;
+  s.label = label;
+  s.fraction = fraction;
+  if (totalBatches != null) s.totalBatches = totalBatches;
+  if (doneBatches != null)  s.doneBatches  = doneBatches;
+  _updateProgressDOM(label, fraction, s);
+}
+
+function endWorkflow(filename, action) {
+  workflowState.delete(wfKey(filename, action));
+  renderDocList(lastDocs);
+}
+
+function _etaText(s) {
+  if (!s.totalBatches || s.doneBatches < 1) return '';
+  const elapsed = Date.now() - s.startTime;
+  const msPerBatch = elapsed / s.doneBatches;
+  const remaining  = (s.totalBatches - s.doneBatches) * msPerBatch;
+  if (remaining <= 0) return '';
+  const secs = Math.round(remaining / 1000);
+  return secs < 60 ? `~${secs}s remaining` : `~${Math.floor(secs / 60)}m ${secs % 60}s remaining`;
+}
+
+function _buildProgressDOM(s) {
+  const wrap = document.createElement('div');
+  wrap.className = 'summary-progress';
+
+  const top = document.createElement('div');
+  top.className = 'summary-progress-top';
+
+  const lbl = document.createElement('span');
+  lbl.className = 'summary-progress-label';
+  lbl.id = 'summaryProgressLabel';
+  lbl.textContent = s.label;
+
+  const eta = document.createElement('span');
+  eta.className = 'summary-progress-eta';
+  eta.id = 'summaryProgressEta';
+  eta.textContent = _etaText(s);
+
+  top.appendChild(lbl);
+  top.appendChild(eta);
+
+  const track = document.createElement('div');
+  track.className = 'summary-progress-track';
+
+  const fill = document.createElement('div');
+  fill.className = 'summary-progress-fill';
+  fill.id = 'summaryProgressFill';
+  fill.style.width = `${Math.round(s.fraction * 100)}%`;
+  track.appendChild(fill);
+
+  const bottom = document.createElement('div');
+  bottom.className = 'summary-progress-bottom';
+
+  const pct = document.createElement('span');
+  pct.className = 'summary-progress-pct';
+  pct.id = 'summaryProgressPct';
+  pct.textContent = s.totalBatches
+    ? `${s.doneBatches} / ${s.totalBatches} passages`
+    : `${Math.round(s.fraction * 100)}%`;
+
+  bottom.appendChild(pct);
+  wrap.appendChild(top);
+  wrap.appendChild(track);
+  wrap.appendChild(bottom);
+  return wrap;
+}
+
+function _updateProgressDOM(label, fraction, s) {
+  const lbl  = document.getElementById('summaryProgressLabel');
+  const fill = document.getElementById('summaryProgressFill');
+  const eta  = document.getElementById('summaryProgressEta');
+  const pct  = document.getElementById('summaryProgressPct');
+  if (lbl)  lbl.textContent  = label;
+  if (fill) fill.style.width = `${Math.round(fraction * 100)}%`;
+  if (eta)  eta.textContent  = _etaText(s);
+  if (pct)  pct.textContent  = s.totalBatches
+    ? `${s.doneBatches} / ${s.totalBatches} passages`
+    : `${Math.round(fraction * 100)}%`;
+}
+
+function openWorkflowModal(filename, action, title) {
+  const key = wfKey(filename, action);
+  const s   = workflowState.get(key) ?? { label: 'Starting…', fraction: 0, startTime: Date.now(), totalBatches: null, doneBatches: 0 };
+  modalTitle.textContent = title;
+  modalBody.innerHTML = '';
+  modalBody.appendChild(_buildProgressDOM(s));
+  modalOverlay.classList.add('open');
+}
 
 async function loadDocuments() {
   let docs;
@@ -644,6 +753,7 @@ async function loadDocuments() {
     return;
   }
   docs.filter(d => d.ingested).forEach(d => ingestingSet.delete(d.name));
+  lastDocs = docs;
   renderDocList(docs);
 
   const stillIngesting = docs.some(d => d.ingesting || ingestingSet.has(d.name) && !d.ingested);
@@ -699,22 +809,40 @@ function renderDocList(docs) {
       const dropdown = document.createElement('div');
       dropdown.className = 'doc-dropdown';
 
+      const WF_TITLES = {
+        Summary:  t => t,
+        Extract:  t => 'Extract — ' + t,
+        Themes:   t => 'Themes — ' + t,
+        Tensions: t => 'Internal Tensions — ' + t,
+      };
+
       const actions = [
-        { label: 'Summary',  fn: () => summarizeDocument(doc.name, dropdown.querySelector('[data-action="Summary"]')) },
-        { label: 'Extract',  fn: () => extractDocument(doc.name,   dropdown.querySelector('[data-action="Extract"]')) },
-        { label: 'Themes',   fn: () => themeDocument(doc.name,     dropdown.querySelector('[data-action="Themes"]')) },
-        { label: 'Tensions', fn: () => tensionDocument(doc.name,   dropdown.querySelector('[data-action="Tensions"]')) },
+        { label: 'Summary',  fn: () => summarizeDocument(doc.name) },
+        { label: 'Extract',  fn: () => extractDocument(doc.name)   },
+        { label: 'Themes',   fn: () => themeDocument(doc.name)     },
+        { label: 'Tensions', fn: () => tensionDocument(doc.name)   },
       ];
+
+      // If any workflow is running for this doc, show an indicator on the menu button
+      const anyRunning = actions.some(a => workflowState.has(wfKey(doc.name, a.label)));
+      if (anyRunning) menuBtn.classList.add('running');
 
       actions.forEach(({ label, fn }) => {
         const opt = document.createElement('button');
         opt.className = 'doc-dropdown-item';
         opt.dataset.action = label;
-        opt.textContent = label;
+        const inProgress = workflowState.has(wfKey(doc.name, label));
+        if (inProgress) opt.classList.add('in-progress');
+        opt.textContent = inProgress ? `${label} ···` : label;
         opt.addEventListener('click', e => {
           e.stopPropagation();
           dropdown.classList.remove('open');
-          fn();
+          if (workflowState.has(wfKey(doc.name, label))) {
+            const title = WF_TITLES[label](doc.name.replace(/\.pdf$/i, ''));
+            openWorkflowModal(doc.name, label, title);
+          } else {
+            fn();
+          }
         });
         dropdown.appendChild(opt);
       });
@@ -757,20 +885,22 @@ async function ingestDocument(filename) {
   docPollTimer = setTimeout(loadDocuments, 2500);
 }
 
-async function summarizeDocument(filename, btn) {
-  btn.disabled = true;
-  btn.textContent = '···';
+async function summarizeDocument(filename) {
+  const action = 'Summary';
+  if (workflowState.has(wfKey(filename, action))) {
+    openWorkflowModal(filename, action, filename.replace(/\.pdf$/i, ''));
+    return;
+  }
 
-  const title = filename.replace(/\.pdf$/i, '');
-  openModal(title, null);
+  startWorkflow(filename, action);
+  openWorkflowModal(filename, action, filename.replace(/\.pdf$/i, ''));
 
   try {
     const fd = new FormData();
     if (activeModel) fd.append('model', activeModel);
 
     const resp = await fetch(`/documents/${encodeURIComponent(filename)}/summary`, {
-      method: 'POST',
-      body: fd,
+      method: 'POST', body: fd,
     });
     if (!resp.ok) throw new Error(`Server error ${resp.status}`);
 
@@ -793,39 +923,40 @@ async function summarizeDocument(filename, btn) {
           } else if (msg.stage === 'cached' || msg.stage === 'done') {
             showModalContent(msg.summary);
           } else if (msg.stage === 'map_cached') {
-            updateSummaryProgress('Using cached passages…', 1);
+            updateWorkflow(filename, action, 'Using cached passages…', 1, null, null);
           } else if (msg.stage === 'map') {
-            updateSummaryProgress(`Reading passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total);
+            updateWorkflow(filename, action, `Reading passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total, msg.batch, msg.total);
           } else if (msg.stage === 'reduce') {
             switchToStreamingView();
           } else if (msg.stage === 'streaming') {
             appendStreamingToken(msg.token);
           }
-        } catch { /* partial line — wait for next chunk */ }
+        } catch { /* partial line */ }
       }
     }
   } catch (err) {
     showModalContent(`**Error generating summary:** ${err.message}`);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Summary';
+    endWorkflow(filename, action);
   }
 }
 
-async function extractDocument(filename, btn) {
-  btn.disabled = true;
-  btn.textContent = '···';
+async function extractDocument(filename) {
+  const action = 'Extract';
+  if (workflowState.has(wfKey(filename, action))) {
+    openWorkflowModal(filename, action, 'Extract — ' + filename.replace(/\.pdf$/i, ''));
+    return;
+  }
 
-  const title = filename.replace(/\.pdf$/i, '');
-  openModal('Extract — ' + title, null);
+  startWorkflow(filename, action);
+  openWorkflowModal(filename, action, 'Extract — ' + filename.replace(/\.pdf$/i, ''));
 
   try {
     const fd = new FormData();
     if (activeModel) fd.append('model', activeModel);
 
     const resp = await fetch(`/documents/${encodeURIComponent(filename)}/extract`, {
-      method: 'POST',
-      body: fd,
+      method: 'POST', body: fd,
     });
     if (!resp.ok) throw new Error(`Server error ${resp.status}`);
 
@@ -848,11 +979,11 @@ async function extractDocument(filename, btn) {
           } else if (msg.stage === 'cached' || msg.stage === 'done') {
             showExtractionCard(msg.data);
           } else if (msg.stage === 'map_cached') {
-            updateSummaryProgress('Using cached passages…', 1);
+            updateWorkflow(filename, action, 'Using cached passages…', 1, null, null);
           } else if (msg.stage === 'map') {
-            updateSummaryProgress(`Scanning passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total);
+            updateWorkflow(filename, action, `Scanning passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total, msg.batch, msg.total);
           } else if (msg.stage === 'reduce') {
-            updateSummaryProgress('Synthesizing fields…', 1);
+            updateWorkflow(filename, action, 'Synthesizing fields…', 1, null, null);
           }
         } catch { }
       }
@@ -860,8 +991,7 @@ async function extractDocument(filename, btn) {
   } catch (err) {
     showModalContent(`**Error extracting data:** ${err.message}`);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Extract';
+    endWorkflow(filename, action);
   }
 }
 
@@ -903,11 +1033,14 @@ function showExtractionCard(data) {
   modalBody.appendChild(table);
 }
 
-async function themeDocument(filename, btn) {
-  btn.disabled = true;
-  btn.textContent = '···';
+async function themeDocument(filename) {
+  const action = 'Themes';
+  const title  = filename.replace(/\.pdf$/i, '');
 
-  const title = filename.replace(/\.pdf$/i, '');
+  if (workflowState.has(wfKey(filename, action))) {
+    openWorkflowModal(filename, action, 'Themes — ' + title);
+    return;
+  }
 
   try {
     const cached = await fetch(`/documents/${encodeURIComponent(filename)}/themes`);
@@ -917,21 +1050,19 @@ async function themeDocument(filename, btn) {
       modalBody.innerHTML = '';
       modalOverlay.classList.add('open');
       showThemesList(data.themes);
-      btn.disabled = false;
-      btn.textContent = 'Themes';
       return;
     }
   } catch { }
 
-  openModal('Themes — ' + title, null);
+  startWorkflow(filename, action);
+  openWorkflowModal(filename, action, 'Themes — ' + title);
 
   try {
     const fd = new FormData();
     if (activeModel) fd.append('model', activeModel);
 
     const resp = await fetch(`/documents/${encodeURIComponent(filename)}/themes`, {
-      method: 'POST',
-      body: fd,
+      method: 'POST', body: fd,
     });
     if (!resp.ok) throw new Error(`Server error ${resp.status}`);
 
@@ -955,11 +1086,11 @@ async function themeDocument(filename, btn) {
             showThemesList(msg.themes);
             loadCorpusPanel();
           } else if (msg.stage === 'map_cached') {
-            updateSummaryProgress('Using cached passages…', 1);
+            updateWorkflow(filename, action, 'Using cached passages…', 1, null, null);
           } else if (msg.stage === 'map') {
-            updateSummaryProgress(`Scanning passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total);
+            updateWorkflow(filename, action, `Scanning passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total, msg.batch, msg.total);
           } else if (msg.stage === 'reduce') {
-            updateSummaryProgress('Consolidating themes…', 1);
+            updateWorkflow(filename, action, 'Consolidating themes…', 1, null, null);
           }
         } catch { }
       }
@@ -967,8 +1098,7 @@ async function themeDocument(filename, btn) {
   } catch (err) {
     showModalContent(`**Error extracting themes:** ${err.message}`);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Themes';
+    endWorkflow(filename, action);
   }
 }
 
@@ -1004,11 +1134,14 @@ function showThemesList(themes) {
   modalBody.appendChild(table);
 }
 
-async function tensionDocument(filename, btn) {
-  btn.disabled = true;
-  btn.textContent = '···';
+async function tensionDocument(filename) {
+  const action = 'Tensions';
+  const title  = filename.replace(/\.pdf$/i, '');
 
-  const title = filename.replace(/\.pdf$/i, '');
+  if (workflowState.has(wfKey(filename, action))) {
+    openWorkflowModal(filename, action, 'Internal Tensions — ' + title);
+    return;
+  }
 
   try {
     const cached = await fetch(`/documents/${encodeURIComponent(filename)}/contradictions`);
@@ -1018,21 +1151,19 @@ async function tensionDocument(filename, btn) {
       modalBody.innerHTML = '';
       modalOverlay.classList.add('open');
       renderContradictions(data.contradictions, filename);
-      btn.disabled = false;
-      btn.textContent = 'Tensions';
       return;
     }
   } catch { }
 
-  openModal('Internal Tensions — ' + title, null);
+  startWorkflow(filename, action);
+  openWorkflowModal(filename, action, 'Internal Tensions — ' + title);
 
   try {
     const fd = new FormData();
     if (activeModel) fd.append('model', activeModel);
 
     const resp = await fetch(`/documents/${encodeURIComponent(filename)}/contradictions`, {
-      method: 'POST',
-      body: fd,
+      method: 'POST', body: fd,
     });
     if (!resp.ok) throw new Error(`Server error ${resp.status}`);
 
@@ -1055,11 +1186,11 @@ async function tensionDocument(filename, btn) {
           } else if (msg.stage === 'cached' || msg.stage === 'done') {
             renderContradictions(msg.contradictions, filename);
           } else if (msg.stage === 'map_cached') {
-            updateSummaryProgress('Using cached passages…', 1);
+            updateWorkflow(filename, action, 'Using cached passages…', 1, null, null);
           } else if (msg.stage === 'map') {
-            updateSummaryProgress(`Scanning passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total);
+            updateWorkflow(filename, action, `Scanning passage ${msg.batch} of ${msg.total}…`, msg.batch / msg.total, msg.batch, msg.total);
           } else if (msg.stage === 'reduce') {
-            updateSummaryProgress('Detecting contradictions…', 1);
+            updateWorkflow(filename, action, 'Detecting contradictions…', 1, null, null);
           }
         } catch { }
       }
@@ -1067,8 +1198,7 @@ async function tensionDocument(filename, btn) {
   } catch (err) {
     showModalContent(`**Error detecting tensions:** ${err.message}`);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Tensions';
+    endWorkflow(filename, action);
   }
 }
 
@@ -1458,12 +1588,6 @@ function openModal(title, content) {
   modalOverlay.classList.add('open');
 }
 
-function updateSummaryProgress(label, fraction) {
-  const lbl  = document.getElementById('summaryProgressLabel');
-  const fill = document.getElementById('summaryProgressFill');
-  if (lbl)  lbl.textContent     = label;
-  if (fill) fill.style.width    = `${Math.round(fraction * 100)}%`;
-}
 
 function showModalContent(content) {
   modalBody.innerHTML = renderContent(content);
